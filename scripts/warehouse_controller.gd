@@ -11,6 +11,7 @@ enum JobState {
 
 const JOB_TARGET_MAX_HORIZONTAL_SNAP := 0.75
 const MAX_PENDING_JOBS := 5
+const INITIAL_STOCK_PER_SHELF := 3
 
 @onready var navigation_region: NavigationRegion3D = $NavigationRegion3D
 @onready var robot: RobotController = $Robot01
@@ -31,6 +32,8 @@ const MAX_PENDING_JOBS := 5
 @onready var status_label: Label = $MovementUI/Panel/Margin/Readout
 @onready var job_panel: PanelContainer = $JobUI/Panel
 @onready var job_status_label: Label = $JobUI/Panel/Margin/Readout
+@onready var inventory_panel: PanelContainer = $InventoryUI/Panel
+@onready var inventory_status_label: Label = $InventoryUI/Panel/Margin/Readout
 
 var _navigation_ready := false
 var _job_state := JobState.IDLE
@@ -42,9 +45,18 @@ var _current_source_package: MeshInstance3D
 var _job_queue: Array[Dictionary] = []
 var _queued_start_scheduled := false
 var _delivery_flash_id := 0
+var _available_stock: Dictionary = {}
+var _current_stock_reserved := false
 
 
 func _ready() -> void:
+	_available_stock = {
+		shelf_01_pickup: INITIAL_STOCK_PER_SHELF,
+		shelf_02_pickup: INITIAL_STOCK_PER_SHELF,
+		shelf_03_pickup: INITIAL_STOCK_PER_SHELF,
+		shelf_04_pickup: INITIAL_STOCK_PER_SHELF,
+	}
+	_update_inventory_ui()
 	robot.movement_changed.connect(_on_robot_movement_changed)
 	robot.destination_reached.connect(_on_robot_destination_reached)
 	robot.navigation_target_failed.connect(_on_robot_navigation_target_failed)
@@ -150,7 +162,8 @@ func _input(event: InputEvent) -> void:
 		return
 	print("Click received: (%.1f, %.1f)" % [mouse_event.position.x, mouse_event.position.y])
 	if movement_panel.get_global_rect().has_point(mouse_event.position) \
-			or job_panel.get_global_rect().has_point(mouse_event.position):
+			or job_panel.get_global_rect().has_point(mouse_event.position) \
+			or inventory_panel.get_global_rect().has_point(mouse_event.position):
 		print("Destination rejected: click is over the UI")
 		get_viewport().set_input_as_handled()
 		return
@@ -205,6 +218,11 @@ func _request_job(pickup_marker: Marker3D, pickup_name: String) -> void:
 		print("Job queue full: request rejected")
 		_update_job_ui(_job_status_text())
 		return
+	if not _has_available_stock(pickup_marker):
+		print("Job rejected: %s out of stock" % pickup_name)
+		return
+	if not _reserve_stock(pickup_marker, pickup_name):
+		return
 
 	var job := {
 		"id": _next_job_id,
@@ -228,6 +246,7 @@ func _begin_job(job: Dictionary) -> void:
 	_current_job_id = job.id
 	_current_pickup_marker = job.pickup_marker
 	_current_pickup_name = job.pickup_name
+	_current_stock_reserved = true
 	carried_package.visible = false
 	_current_source_package = _get_source_package_for_pickup(_current_pickup_marker)
 	if _current_source_package != null:
@@ -345,6 +364,12 @@ func _complete_job() -> void:
 	if _current_source_package != null:
 		_current_source_package.visible = true
 	print("%s package delivered" % _current_job_label())
+	_current_stock_reserved = false
+	print("Inventory consumed: %s — %d/%d available" % [
+		_current_pickup_name,
+		_get_available_stock(_current_pickup_marker),
+		INITIAL_STOCK_PER_SHELF,
+	])
 	_show_delivered_package_briefly()
 	_job_state = JobState.COMPLETE
 	_update_job_ui("Complete")
@@ -358,10 +383,53 @@ func _fail_job(reason: String) -> void:
 		_current_source_package.visible = true
 	_delivery_flash_id += 1
 	delivered_package.visible = false
+	if _current_stock_reserved:
+		_release_stock(_current_pickup_marker, _current_pickup_name)
+		_current_stock_reserved = false
 	_job_state = JobState.FAILED
 	_update_job_ui("Failed")
 	print("%s failed: %s" % [_current_job_label(), reason])
 	_schedule_next_queued_job()
+
+
+func _get_available_stock(pickup_marker: Marker3D) -> int:
+	return int(_available_stock.get(pickup_marker, 0))
+
+
+func _has_available_stock(pickup_marker: Marker3D) -> bool:
+	return _get_available_stock(pickup_marker) > 0
+
+
+func _reserve_stock(pickup_marker: Marker3D, pickup_name: String) -> bool:
+	var available := _get_available_stock(pickup_marker)
+	if available <= 0:
+		return false
+	_available_stock[pickup_marker] = available - 1
+	print("Inventory reserved: %s — %d/%d available" % [
+		pickup_name, available - 1, INITIAL_STOCK_PER_SHELF
+	])
+	_update_inventory_ui()
+	return true
+
+
+func _release_stock(pickup_marker: Marker3D, pickup_name: String) -> void:
+	var available := mini(
+		_get_available_stock(pickup_marker) + 1, INITIAL_STOCK_PER_SHELF
+	)
+	_available_stock[pickup_marker] = available
+	print("Inventory reservation released: %s — %d/%d available" % [
+		pickup_name, available, INITIAL_STOCK_PER_SHELF
+	])
+	_update_inventory_ui()
+
+
+func _update_inventory_ui() -> void:
+	inventory_status_label.text = "Available Stock\nShelf 01: %d\nShelf 02: %d\nShelf 03: %d\nShelf 04: %d" % [
+		_get_available_stock(shelf_01_pickup),
+		_get_available_stock(shelf_02_pickup),
+		_get_available_stock(shelf_03_pickup),
+		_get_available_stock(shelf_04_pickup),
+	]
 
 
 func _get_source_package_for_pickup(marker: Marker3D) -> MeshInstance3D:
