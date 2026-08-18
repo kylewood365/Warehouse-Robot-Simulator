@@ -18,6 +18,8 @@ const JOB_TARGET_MAX_HORIZONTAL_SNAP := 0.75
 const MAX_PENDING_JOBS := 5
 const INITIAL_STOCK_PER_SHELF := 3
 const MAX_RECENT_JOB_HISTORY := 5
+const NORMAL_SLA_SECONDS := 20.0
+const HIGH_SLA_SECONDS := 12.0
 
 @onready var navigation_region: NavigationRegion3D = $NavigationRegion3D
 @onready var robot: RobotController = $Robot01
@@ -72,7 +74,11 @@ var _jobs_accepted := 0
 var _jobs_completed := 0
 var _jobs_failed := 0
 var _current_job_started_msec := 0
+var _current_job_accepted_msec := 0
+var _current_job_sla_seconds := 0.0
 var _completed_execution_seconds := 0.0
+var _sla_on_time := 0
+var _sla_late := 0
 var _recent_job_history: Array[Dictionary] = []
 
 
@@ -300,6 +306,8 @@ func _request_job(
 		"pickup_marker": pickup_marker,
 		"pickup_name": pickup_name,
 		"priority": priority,
+		"accepted_msec": Time.get_ticks_msec(),
+		"sla_seconds": _sla_seconds_for_priority(priority),
 	}
 	_next_job_id += 1
 	_jobs_accepted += 1
@@ -334,6 +342,8 @@ func _begin_job(job: Dictionary) -> void:
 	_current_job_priority = job.priority
 	_current_pickup_marker = job.pickup_marker
 	_current_pickup_name = job.pickup_name
+	_current_job_accepted_msec = job.accepted_msec
+	_current_job_sla_seconds = job.sla_seconds
 	_current_stock_reserved = true
 	carried_package.visible = false
 	_current_source_package = _get_source_package_for_pickup(_current_pickup_marker)
@@ -455,10 +465,20 @@ func _begin_delivery() -> void:
 
 func _complete_job() -> void:
 	var elapsed_seconds := _current_job_elapsed_seconds()
+	var lead_seconds := _current_job_lead_seconds()
+	var sla_result := "ON TIME" if lead_seconds <= _current_job_sla_seconds else "LATE"
 	_jobs_completed += 1
+	if sla_result == "ON TIME":
+		_sla_on_time += 1
+	else:
+		_sla_late += 1
 	_completed_execution_seconds += elapsed_seconds
-	_record_job_result("COMPLETE", elapsed_seconds)
+	_record_job_result(
+		"COMPLETE", elapsed_seconds, lead_seconds, _current_job_sla_seconds, sla_result
+	)
 	_current_job_started_msec = 0
+	_current_job_accepted_msec = 0
+	_current_job_sla_seconds = 0.0
 	carried_package.visible = false
 	if _current_source_package != null:
 		_current_source_package.visible = true
@@ -479,9 +499,14 @@ func _complete_job() -> void:
 
 func _fail_job(reason: String) -> void:
 	var elapsed_seconds := _current_job_elapsed_seconds()
+	var lead_seconds := _current_job_lead_seconds()
 	_jobs_failed += 1
-	_record_job_result("FAILED", elapsed_seconds)
+	_record_job_result(
+		"FAILED", elapsed_seconds, lead_seconds, _current_job_sla_seconds, "FAILED"
+	)
 	_current_job_started_msec = 0
+	_current_job_accepted_msec = 0
+	_current_job_sla_seconds = 0.0
 	carried_package.visible = false
 	if _current_source_package != null:
 		_current_source_package.visible = true
@@ -587,22 +612,40 @@ func _current_job_elapsed_seconds() -> float:
 	return (Time.get_ticks_msec() - _current_job_started_msec) / 1000.0
 
 
-func _record_job_result(status: String, elapsed_seconds: float) -> void:
+func _current_job_lead_seconds() -> float:
+	if _current_job_accepted_msec == 0:
+		return 0.0
+	return (Time.get_ticks_msec() - _current_job_accepted_msec) / 1000.0
+
+
+func _record_job_result(
+		status: String,
+		elapsed_seconds: float,
+		lead_seconds: float,
+		sla_seconds: float,
+		sla_result: String
+) -> void:
 	_recent_job_history.push_front({
 		"id": _current_job_id,
 		"pickup_name": _current_pickup_name,
 		"priority": _current_job_priority,
 		"status": status,
 		"duration": elapsed_seconds,
+		"lead_time": lead_seconds,
+		"sla_seconds": sla_seconds,
+		"sla_result": sla_result,
 	})
 	if _recent_job_history.size() > MAX_RECENT_JOB_HISTORY:
 		_recent_job_history.pop_back()
-	print("Job #%03d [%s] %s %s %.1fs" % [
+	print("Job #%03d [%s] %s %s | Execution %.1fs | SLA %s %.1f/%.1fs" % [
 		_current_job_id,
 		_priority_name(_current_job_priority),
 		_current_pickup_name,
 		status,
 		elapsed_seconds,
+		sla_result,
+		lead_seconds,
+		sla_seconds,
 	])
 
 
@@ -617,6 +660,9 @@ func _update_operations_ui() -> void:
 	var average_text := "--"
 	if _jobs_completed > 0:
 		average_text = "%.1fs" % (_completed_execution_seconds / _jobs_completed)
+	var sla_hit_rate_text := "--"
+	if _jobs_completed > 0:
+		sla_hit_rate_text = "%.1f%%" % (float(_sla_on_time) / _jobs_completed * 100.0)
 	var lines: Array[String] = [
 		"Operations",
 		"Accepted: %d" % _jobs_accepted,
@@ -624,6 +670,10 @@ func _update_operations_ui() -> void:
 		"Failed: %d" % _jobs_failed,
 		"Active: %s" % active_text,
 		"Avg complete: %s" % average_text,
+		"SLA on-time: %d" % _sla_on_time,
+		"SLA late: %d" % _sla_late,
+		"SLA hit rate: %s" % sla_hit_rate_text,
+		"SLA targets: N 20s / H 12s",
 		"",
 		"Recent",
 	]
@@ -631,12 +681,15 @@ func _update_operations_ui() -> void:
 		lines.append("No job history yet")
 	else:
 		for result in _recent_job_history:
-			lines.append("#%03d [%s] %s %s %.1fs" % [
+			var history_pickup_name: String = result.pickup_name.replace("Shelf Row ", "Row")
+			var result_suffix := "" if result.status == "FAILED" else " %s" % result.sla_result
+			lines.append("#%03d [%s] %s %s %.1fs%s" % [
 				result.id,
 				_priority_name(result.priority),
-				result.pickup_name,
+				history_pickup_name,
 				result.status,
 				result.duration,
+				result_suffix,
 			])
 	operations_status_label.text = "\n".join(lines)
 
@@ -730,6 +783,10 @@ func _current_job_label() -> String:
 
 func _priority_name(priority: int) -> String:
 	return "HIGH" if priority == JobPriority.HIGH else "NORMAL"
+
+
+func _sla_seconds_for_priority(priority: int) -> float:
+	return HIGH_SLA_SECONDS if priority == JobPriority.HIGH else NORMAL_SLA_SECONDS
 
 
 func _format_vector3(value: Vector3) -> String:

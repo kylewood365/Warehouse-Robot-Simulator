@@ -397,7 +397,7 @@ anchor_right = 1.0
 offset_left = -360.0
 offset_top = 190.0
 offset_right = -16.0
-offset_bottom = 448.0
+offset_bottom = 510.0
 grow_horizontal = 0
 mouse_filter = 1
 theme_override_styles/panel = SubResource("PanelStyle")
@@ -407,6 +407,6 @@ theme_override_constants/margin_top = 10
 theme_override_constants/margin_right = 14
 theme_override_constants/margin_bottom = 10
 [node name="Readout" type="Label" parent="OperationsUI/Panel/Margin"]
-text = "Operations\nAccepted: 0\nCompleted: 0\nFailed: 0\nActive: None\nAvg complete: --\n\nRecent\nNo job history yet"
+text = "Operations\nAccepted: 0\nCompleted: 0\nFailed: 0\nActive: None\nAvg complete: --\nSLA on-time: 0\nSLA late: 0\nSLA hit rate: --\nSLA targets: N 20s / H 12s\n\nRecent\nNo job history yet"
 theme_override_colors/font_color = Color(0.9, 0.96, 1, 1)
 theme_override_font_sizes/font_size = 14
