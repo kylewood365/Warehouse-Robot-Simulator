@@ -33,6 +33,10 @@ func _ready() -> void:
 		status_label.text = "Robot01\nStatus: Navigation unavailable\nSpeed: 0.00 m/s\nDestination: —"
 		return
 	_navigation_ready = true
+	print(
+		"Navigation mesh: %d vertices, %d polygons"
+		% [navigation_mesh.get_vertices().size(), navigation_mesh.get_polygon_count()]
+	)
 	print("Navigation ready")
 	_on_robot_movement_changed("Idle", 0.0, Vector3.ZERO)
 
