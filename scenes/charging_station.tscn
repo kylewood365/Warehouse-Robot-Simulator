@@ -1,12 +1,20 @@
-[gd_scene load_steps=7 format=3]
+[gd_scene load_steps=9 format=3]
 [sub_resource type="StandardMaterial3D" id="DarkMaterial"]
 albedo_color = Color(0.08, 0.1, 0.13, 1)
-roughness = 0.5
+metallic = 0.62
+roughness = 0.36
 [sub_resource type="StandardMaterial3D" id="GlowMaterial"]
-albedo_color = Color(0.12, 0.78, 0.42, 1)
+albedo_color = Color(0.05, 0.7, 0.95, 1)
 emission_enabled = true
-emission = Color(0.04, 0.45, 0.17, 1)
-emission_energy_multiplier = 0.7
+emission = Color(0.02, 0.5, 0.9, 1)
+emission_energy_multiplier = 1.8
+[sub_resource type="StandardMaterial3D" id="TrimMaterial"]
+albedo_color = Color(0.16, 0.23, 0.29, 1)
+metallic = 0.7
+roughness = 0.3
+[sub_resource type="StandardMaterial3D" id="WarningMaterial"]
+albedo_color = Color(0.92, 0.52, 0.05, 1)
+roughness = 0.6
 [sub_resource type="BoxMesh" id="ChargerMesh"]
 material = SubResource("DarkMaterial")
 size = Vector3(2.2, 1.8, 0.45)
@@ -31,3 +39,30 @@ material_override = SubResource("GlowMaterial")
 [node name="ChargingPad" type="MeshInstance3D" parent="."]
 position = Vector3(0, 0.035, -1.25)
 mesh = SubResource("PadMesh")
+[node name="DockTrimLeft" type="MeshInstance3D" parent="."]
+position = Vector3(-1.18, 0.14, -1.25)
+mesh = SubResource("UnitBoxMesh")
+scale = Vector3(0.16, 0.22, 2.35)
+material_override = SubResource("TrimMaterial")
+[node name="DockTrimRight" type="MeshInstance3D" parent="."]
+position = Vector3(1.18, 0.14, -1.25)
+mesh = SubResource("UnitBoxMesh")
+scale = Vector3(0.16, 0.22, 2.35)
+material_override = SubResource("TrimMaterial")
+[node name="ChargeRailLeft" type="MeshInstance3D" parent="."]
+position = Vector3(-0.8, 0.085, -1.25)
+mesh = SubResource("UnitBoxMesh")
+scale = Vector3(0.08, 0.06, 1.8)
+material_override = SubResource("GlowMaterial")
+cast_shadow = 0
+[node name="ChargeRailRight" type="MeshInstance3D" parent="."]
+position = Vector3(0.8, 0.085, -1.25)
+mesh = SubResource("UnitBoxMesh")
+scale = Vector3(0.08, 0.06, 1.8)
+material_override = SubResource("GlowMaterial")
+cast_shadow = 0
+[node name="WarningHeader" type="MeshInstance3D" parent="."]
+position = Vector3(0, 1.65, -0.24)
+mesh = SubResource("UnitBoxMesh")
+scale = Vector3(1.7, 0.1, 0.04)
+material_override = SubResource("WarningMaterial")
