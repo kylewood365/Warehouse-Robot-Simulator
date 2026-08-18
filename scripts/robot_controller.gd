@@ -21,14 +21,7 @@ func _ready() -> void:
 
 
 func set_navigation_target(target: Vector3) -> void:
-	# Keep the CharacterBody3D on the physical floor while placing its navigation
-	# query origin on the actual mesh. This offset is derived from the map rather
-	# than assuming a particular navigation mesh height.
-	var navigation_map := navigation_agent.get_navigation_map()
-	var navigation_origin := NavigationServer3D.map_get_closest_point(
-		navigation_map, global_position
-	)
-	navigation_agent.position.y = navigation_origin.y - global_position.y
+	print("Robot set_navigation_target called: %s" % _format_vector3(target))
 	_destination = Vector3(target.x, global_position.y, target.z)
 	_has_target = true
 	_path_diagnostics_pending = true
@@ -48,8 +41,16 @@ func _physics_process(delta: float) -> void:
 		_path_diagnostics_pending = false
 		print("Navigation final position: %s" % _format_vector3(navigation_agent.get_final_position()))
 		print("Target reachable: %s" % _format_bool(navigation_agent.is_target_reachable()))
+
+	var horizontal_remaining := _get_horizontal_remaining()
+	if horizontal_remaining <= navigation_agent.target_desired_distance:
+		_print_arrival_diagnostics(horizontal_remaining)
+		_has_target = false
+		_stop_robot(delta)
+		return
+
 	if navigation_agent.is_navigation_finished():
-		_print_finished_diagnostics()
+		_print_finished_early_diagnostics(horizontal_remaining)
 		_has_target = false
 		_stop_robot(delta)
 		return
@@ -80,15 +81,24 @@ func _stop_robot(delta: float) -> void:
 	movement_changed.emit("Idle", Vector2(velocity.x, velocity.z).length(), _destination)
 
 
-func _print_finished_diagnostics() -> void:
-	var horizontal_distance := Vector2(
+func _get_horizontal_remaining() -> float:
+	return Vector2(
 		_destination.x - global_position.x,
 		_destination.z - global_position.z
 	).length()
-	print("Navigation finished")
+
+
+func _print_arrival_diagnostics(horizontal_remaining: float) -> void:
+	print("Robot destination reached")
 	print("Robot position: %s" % _format_vector3(global_position))
-	print("Horizontal distance remaining: %.3f" % horizontal_distance)
-	print("Target reached: %s" % _format_bool(navigation_agent.is_target_reached()))
+	print("Horizontal distance remaining: %.3f" % horizontal_remaining)
+
+
+func _print_finished_early_diagnostics(horizontal_remaining: float) -> void:
+	print("Navigation finished before horizontal destination")
+	print("Robot position: %s" % _format_vector3(global_position))
+	print("Navigation final position: %s" % _format_vector3(navigation_agent.get_final_position()))
+	print("Horizontal distance remaining: %.3f" % horizontal_remaining)
 	print("Target reachable: %s" % _format_bool(navigation_agent.is_target_reachable()))
 
 
