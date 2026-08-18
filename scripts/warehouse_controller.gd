@@ -368,7 +368,9 @@ func _cancel_latest_pending_job() -> void:
 
 
 func _cancel_pending_job(job: Dictionary) -> void:
-	var wait_seconds := (Time.get_ticks_msec() - job.accepted_msec) / 1000.0
+	var wait_seconds: float = (
+		Time.get_ticks_msec() - int(job.accepted_msec)
+	) / 1000.0
 	_release_stock(job.pickup_marker, job.pickup_name)
 	_jobs_cancelled += 1
 	_record_job_result(job, "CANCELLED", 0.0, wait_seconds, "")
