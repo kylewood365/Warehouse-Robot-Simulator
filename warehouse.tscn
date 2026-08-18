@@ -341,7 +341,7 @@ theme_override_font_sizes/font_size = 16
 offset_left = 16.0
 offset_top = 142.0
 offset_right = 304.0
-offset_bottom = 294.0
+offset_bottom = 340.0
 mouse_filter = 1
 theme_override_styles/panel = SubResource("PanelStyle")
 [node name="Margin" type="MarginContainer" parent="JobUI/Panel"]
@@ -350,6 +350,6 @@ theme_override_constants/margin_top = 10
 theme_override_constants/margin_right = 14
 theme_override_constants/margin_bottom = 10
 [node name="Readout" type="Label" parent="JobUI/Panel/Margin"]
-text = "Warehouse Jobs\nPress 1: Shelf Row 01\nPress 2: Shelf Row 02\nPress 3: Shelf Row 03\nPress 4: Shelf Row 04\nStatus: Preparing navigation..."
+text = "Warehouse Jobs\nPress 1: Shelf Row 01\nPress 2: Shelf Row 02\nPress 3: Shelf Row 03\nPress 4: Shelf Row 04\nStatus: Preparing navigation...\nPending: 0/5"
 theme_override_colors/font_color = Color(0.9, 0.96, 1, 1)
 theme_override_font_sizes/font_size = 16
