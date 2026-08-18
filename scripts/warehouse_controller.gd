@@ -15,7 +15,10 @@ const JOB_TARGET_MAX_HORIZONTAL_SNAP := 0.75
 @onready var robot: RobotController = $Robot01
 @onready var camera: Camera3D = $OverviewCamera
 @onready var destination_marker: MeshInstance3D = $DestinationMarker
-@onready var shelf_pickup: Marker3D = $JobTargets/Shelf03Pickup
+@onready var shelf_01_pickup: Marker3D = $JobTargets/Shelf01Pickup
+@onready var shelf_02_pickup: Marker3D = $JobTargets/Shelf02Pickup
+@onready var shelf_03_pickup: Marker3D = $JobTargets/Shelf03Pickup
+@onready var shelf_04_pickup: Marker3D = $JobTargets/Shelf04Pickup
 @onready var packing_dropoff: Marker3D = $JobTargets/PackingDropoff
 @onready var movement_panel: PanelContainer = $MovementUI/Panel
 @onready var status_label: Label = $MovementUI/Panel/Margin/Readout
@@ -24,6 +27,10 @@ const JOB_TARGET_MAX_HORIZONTAL_SNAP := 0.75
 
 var _navigation_ready := false
 var _job_state := JobState.IDLE
+var _next_job_id := 1
+var _current_job_id := 0
+var _current_pickup_marker: Marker3D
+var _current_pickup_name := ""
 
 
 func _ready() -> void:
@@ -89,7 +96,7 @@ func _build_navigation() -> void:
 	_navigation_ready = true
 	print("Navigation ready")
 	_on_robot_movement_changed("Idle", 0.0, Vector3.ZERO)
-	_update_job_ui("Ready — press J")
+	_update_job_ui("Ready")
 
 
 func _navigation_failed(stage: String, detail: String) -> void:
@@ -104,12 +111,30 @@ func _navigation_failed(stage: String, detail: String) -> void:
 func _input(event: InputEvent) -> void:
 	if event is InputEventKey:
 		var key_event := event as InputEventKey
-		if key_event.pressed and not key_event.echo and key_event.keycode == KEY_J:
-			if _navigation_ready:
-				_start_test_job()
-			else:
-				print("Job #001 unavailable: navigation is not ready")
-			get_viewport().set_input_as_handled()
+		if key_event.pressed and not key_event.echo:
+			var selected_pickup: Marker3D
+			var selected_name := ""
+			match key_event.keycode:
+				KEY_1:
+					selected_pickup = shelf_01_pickup
+					selected_name = "Shelf Row 01"
+				KEY_2:
+					selected_pickup = shelf_02_pickup
+					selected_name = "Shelf Row 02"
+				KEY_3:
+					selected_pickup = shelf_03_pickup
+					selected_name = "Shelf Row 03"
+				KEY_4:
+					selected_pickup = shelf_04_pickup
+					selected_name = "Shelf Row 04"
+			if selected_pickup != null:
+				if _is_job_active():
+					print("Job start ignored: autonomous job already active")
+				elif _navigation_ready:
+					_start_job(selected_pickup, selected_name)
+				else:
+					print("Job start unavailable: navigation is not ready")
+				get_viewport().set_input_as_handled()
 		return
 
 	if not _navigation_ready or not event is InputEventMouseButton:
@@ -165,14 +190,16 @@ func _input(event: InputEvent) -> void:
 	get_viewport().set_input_as_handled()
 
 
-func _start_test_job() -> void:
-	if _is_job_active():
-		print("Job #001 start ignored: autonomous job already active")
-		return
+func _start_job(pickup_marker: Marker3D, pickup_name: String) -> void:
+	_current_job_id = _next_job_id
+	_next_job_id += 1
+	_current_pickup_marker = pickup_marker
+	_current_pickup_name = pickup_name
 	_job_state = JobState.TRAVELLING_TO_PICKUP
-	print("Job #001 started")
-	_update_job_ui("Travelling to Shelf Row 03")
-	_command_job_target(shelf_pickup, "Shelf Row 03")
+	print("%s started" % _current_job_label())
+	print("Pickup: %s" % _current_pickup_name)
+	_update_job_ui("Travelling to %s" % _current_pickup_name)
+	_command_job_target(_current_pickup_marker, _current_pickup_name)
 
 
 func _command_job_target(marker: Marker3D, target_name: String) -> void:
@@ -214,10 +241,12 @@ func _get_navigation_target_for_job(marker: Marker3D, target_name: String) -> Di
 func _on_robot_destination_reached(_destination: Vector3) -> void:
 	match _job_state:
 		JobState.TRAVELLING_TO_PICKUP:
-			print("Robot arrived for Job #001 pickup")
+			print("Robot arrived for %s pickup: %s" % [
+				_current_job_label(), _current_pickup_name
+			])
 			_begin_pickup()
 		JobState.TRAVELLING_TO_PACKING:
-			print("Robot arrived at packing station")
+			print("Robot arrived at packing station for %s" % _current_job_label())
 			_complete_job()
 
 
@@ -227,12 +256,12 @@ func _on_robot_navigation_target_failed(
 	var failed_leg := ""
 	match _job_state:
 		JobState.TRAVELLING_TO_PICKUP:
-			failed_leg = "Shelf Row 03 pickup"
+			failed_leg = "%s pickup" % _current_pickup_name
 		JobState.TRAVELLING_TO_PACKING:
 			failed_leg = "Packing Station delivery"
 		_:
 			return
-	print("Job #001 leg failed: %s" % failed_leg)
+	print("%s leg failed: %s" % [_current_job_label(), failed_leg])
 	print("Job failure destination: %s" % _format_vector3(destination))
 	print("Job failure horizontal remaining: %.3f" % horizontal_remaining)
 	_fail_job("%s navigation failed" % failed_leg)
@@ -240,7 +269,7 @@ func _on_robot_navigation_target_failed(
 
 func _begin_pickup() -> void:
 	_job_state = JobState.PICKING
-	print("Job #001 picking package")
+	print("%s picking package" % _current_job_label())
 	_update_job_ui("Picking package...")
 	await get_tree().create_timer(1.0).timeout
 	if _job_state != JobState.PICKING:
@@ -257,13 +286,13 @@ func _begin_delivery() -> void:
 func _complete_job() -> void:
 	_job_state = JobState.COMPLETE
 	_update_job_ui("Complete")
-	print("Job #001 complete")
+	print("%s complete" % _current_job_label())
 
 
 func _fail_job(reason: String) -> void:
 	_job_state = JobState.FAILED
 	_update_job_ui("Failed")
-	print("Job #001 failed: %s" % reason)
+	print("%s failed: %s" % [_current_job_label(), reason])
 
 
 func _is_job_active() -> bool:
@@ -275,7 +304,16 @@ func _is_job_active() -> bool:
 
 
 func _update_job_ui(status: String) -> void:
-	job_status_label.text = "Job #001\nPick: Shelf Row 03\nDrop: Packing Station\nStatus: %s" % status
+	if _current_job_id == 0:
+		job_status_label.text = "Warehouse Jobs\nPress 1: Shelf Row 01\nPress 2: Shelf Row 02\nPress 3: Shelf Row 03\nPress 4: Shelf Row 04\nStatus: %s" % status
+		return
+	job_status_label.text = "%s\nPick: %s\nDrop: Packing Station\nStatus: %s" % [
+		_current_job_label(), _current_pickup_name, status
+	]
+
+
+func _current_job_label() -> String:
+	return "Job #%03d" % _current_job_id
 
 
 func _format_vector3(value: Vector3) -> String:
