@@ -143,6 +143,40 @@ position = Vector3(3, 0, -1)
 [node name="ShelfRow04" parent="Shelving" instance=ExtResource("1_shelf")]
 position = Vector3(9, 0, -1)
 
+[node name="StockIndicators" type="Node3D" parent="."]
+[node name="Shelf01Stock" type="Label3D" parent="StockIndicators"]
+position = Vector3(-9, 3.9, 2.9)
+text = "AVAILABLE: 3/3"
+font_size = 64
+outline_size = 12
+modulate = Color(0.35, 1, 0.55, 1)
+billboard = 1
+no_depth_test = true
+[node name="Shelf02Stock" type="Label3D" parent="StockIndicators"]
+position = Vector3(-3, 3.9, 2.9)
+text = "AVAILABLE: 3/3"
+font_size = 64
+outline_size = 12
+modulate = Color(0.35, 1, 0.55, 1)
+billboard = 1
+no_depth_test = true
+[node name="Shelf03Stock" type="Label3D" parent="StockIndicators"]
+position = Vector3(3, 3.9, 2.9)
+text = "AVAILABLE: 3/3"
+font_size = 64
+outline_size = 12
+modulate = Color(0.35, 1, 0.55, 1)
+billboard = 1
+no_depth_test = true
+[node name="Shelf04Stock" type="Label3D" parent="StockIndicators"]
+position = Vector3(9, 3.9, 2.9)
+text = "AVAILABLE: 3/3"
+font_size = 64
+outline_size = 12
+modulate = Color(0.35, 1, 0.55, 1)
+billboard = 1
+no_depth_test = true
+
 [node name="Stations" type="Node3D" parent="." groups=["navigation_source"]]
 [node name="PackingStation" parent="Stations" instance=ExtResource("3_pack")]
 position = Vector3(-10.5, 0, 8.7)
@@ -375,7 +409,7 @@ anchor_right = 1.0
 offset_left = -190.0
 offset_top = 16.0
 offset_right = -16.0
-offset_bottom = 154.0
+offset_bottom = 174.0
 grow_horizontal = 0
 mouse_filter = 1
 theme_override_styles/panel = SubResource("PanelStyle")
@@ -385,6 +419,6 @@ theme_override_constants/margin_top = 10
 theme_override_constants/margin_right = 14
 theme_override_constants/margin_bottom = 10
 [node name="Readout" type="Label" parent="InventoryUI/Panel/Margin"]
-text = "Available Stock\nShelf 01: 3\nShelf 02: 3\nShelf 03: 3\nShelf 04: 3"
+text = "Available Stock / Restock\nShelf 01: 3   [5] +1\nShelf 02: 3   [6] +1\nShelf 03: 3   [7] +1\nShelf 04: 3   [8] +1"
 theme_override_colors/font_color = Color(0.9, 0.96, 1, 1)
 theme_override_font_sizes/font_size = 16
