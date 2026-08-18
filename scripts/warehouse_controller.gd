@@ -17,8 +17,23 @@ func _ready() -> void:
 	# This synchronous bake runs once. STATIC_COLLIDERS includes the floor, walls,
 	# shelves, and stations while excluding the movable CharacterBody3D robot.
 	navigation_region.bake_navigation_mesh(false)
+	print("Navigation bake completed")
 	await get_tree().physics_frame
+	var navigation_mesh := navigation_region.navigation_mesh
+	var navigation_map := navigation_region.get_navigation_map()
+	var map_regions := NavigationServer3D.map_get_regions(navigation_map)
+	var has_usable_geometry := (
+		navigation_mesh != null
+		and not navigation_mesh.get_vertices().is_empty()
+		and navigation_mesh.get_polygon_count() > 0
+		and map_regions.has(navigation_region.get_rid())
+	)
+	if not has_usable_geometry:
+		push_error("Navigation bake produced no usable navigation geometry; click-to-move is disabled")
+		status_label.text = "Robot01\nStatus: Navigation unavailable\nSpeed: 0.00 m/s\nDestination: —"
+		return
 	_navigation_ready = true
+	print("Navigation ready")
 	_on_robot_movement_changed("Idle", 0.0, Vector3.ZERO)
 
 
