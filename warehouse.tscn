@@ -146,6 +146,12 @@ rotation_degrees = Vector3(0, 180, 0)
 [node name="Robot01" parent="." instance=ExtResource("2_robot")]
 position = Vector3(0, 0, 7.8)
 
+[node name="JobTargets" type="Node3D" parent="."]
+[node name="Shelf03Pickup" type="Marker3D" parent="JobTargets"]
+position = Vector3(3, 0, 4.3)
+[node name="PackingDropoff" type="Marker3D" parent="JobTargets"]
+position = Vector3(-10.5, 0, 6.2)
+
 [node name="VisualPolish" type="Node3D" parent="."]
 [node name="FloorMarkings" type="Node3D" parent="VisualPolish"]
 [node name="PackingZone" type="MeshInstance3D" parent="VisualPolish/FloorMarkings"]
@@ -321,5 +327,23 @@ theme_override_constants/margin_right = 14
 theme_override_constants/margin_bottom = 10
 [node name="Readout" type="Label" parent="MovementUI/Panel/Margin"]
 text = "Robot01\nStatus: Preparing navigation...\nSpeed: 0.00 m/s\nDestination: —"
+theme_override_colors/font_color = Color(0.9, 0.96, 1, 1)
+theme_override_font_sizes/font_size = 16
+
+[node name="JobUI" type="CanvasLayer" parent="."]
+[node name="Panel" type="PanelContainer" parent="JobUI"]
+offset_left = 16.0
+offset_top = 142.0
+offset_right = 304.0
+offset_bottom = 264.0
+mouse_filter = 1
+theme_override_styles/panel = SubResource("PanelStyle")
+[node name="Margin" type="MarginContainer" parent="JobUI/Panel"]
+theme_override_constants/margin_left = 14
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 14
+theme_override_constants/margin_bottom = 10
+[node name="Readout" type="Label" parent="JobUI/Panel/Margin"]
+text = "Job #001\nPick: Shelf Row 03\nDrop: Packing Station\nStatus: Preparing navigation..."
 theme_override_colors/font_color = Color(0.9, 0.96, 1, 1)
 theme_override_font_sizes/font_size = 16
