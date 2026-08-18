@@ -1,4 +1,4 @@
-[gd_scene load_steps=25 format=3 uid="uid://cby2cbm7o72yy"]
+[gd_scene load_steps=27 format=3 uid="uid://cby2cbm7o72yy"]
 
 [ext_resource type="PackedScene" path="res://scenes/shelf_unit.tscn" id="1_shelf"]
 [ext_resource type="PackedScene" path="res://scenes/robot.tscn" id="2_robot"]
@@ -83,6 +83,12 @@ corner_radius_top_left = 6
 corner_radius_top_right = 6
 corner_radius_bottom_right = 6
 corner_radius_bottom_left = 6
+[sub_resource type="StandardMaterial3D" id="DeliveredPackageMaterial"]
+albedo_color = Color(0.62, 0.38, 0.16, 1)
+roughness = 0.9
+[sub_resource type="BoxMesh" id="DeliveredPackageMesh"]
+material = SubResource("DeliveredPackageMaterial")
+size = Vector3(0.7, 0.45, 0.6)
 
 [node name="Warehouse" type="Node3D"]
 script = ExtResource("5_controller")
@@ -157,6 +163,13 @@ position = Vector3(3, 0, 4.3)
 position = Vector3(9, 0, 4.3)
 [node name="PackingDropoff" type="Marker3D" parent="JobTargets"]
 position = Vector3(-10.5, 0, 6.2)
+
+[node name="JobVisuals" type="Node3D" parent="."]
+[node name="DeliveredPackage" type="MeshInstance3D" parent="JobVisuals"]
+position = Vector3(-10.5, 0.225, 6.2)
+visible = false
+mesh = SubResource("DeliveredPackageMesh")
+cast_shadow = 0
 
 [node name="VisualPolish" type="Node3D" parent="."]
 [node name="FloorMarkings" type="Node3D" parent="VisualPolish"]
