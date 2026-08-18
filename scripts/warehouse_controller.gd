@@ -73,6 +73,7 @@ var _current_stock_reserved := false
 var _jobs_accepted := 0
 var _jobs_completed := 0
 var _jobs_failed := 0
+var _jobs_cancelled := 0
 var _current_job_started_msec := 0
 var _current_job_accepted_msec := 0
 var _current_job_sla_seconds := 0.0
@@ -219,6 +220,14 @@ func _input(event: InputEvent) -> void:
 					selected_pickup = shelf_04_pickup
 					selected_name = "Shelf Row 04"
 					is_restock = true
+				KEY_Z:
+					_cancel_next_pending_job()
+					get_viewport().set_input_as_handled()
+					return
+				KEY_X:
+					_cancel_latest_pending_job()
+					get_viewport().set_input_as_handled()
+					return
 			if selected_pickup != null:
 				if is_restock:
 					_request_restock(selected_pickup, selected_name)
@@ -335,6 +344,39 @@ func _enqueue_job_by_priority(job: Dictionary) -> void:
 			and _job_queue[insertion_index].priority == JobPriority.HIGH:
 		insertion_index += 1
 	_job_queue.insert(insertion_index, job)
+
+
+func _cancel_next_pending_job() -> void:
+	if _job_queue.is_empty():
+		print("Cancel rejected: no pending jobs")
+		return
+	var job: Dictionary = _job_queue.pop_front()
+	_cancel_pending_job(job)
+
+
+func _cancel_latest_pending_job() -> void:
+	if _job_queue.is_empty():
+		print("Cancel rejected: no pending jobs")
+		return
+	var latest_index := 0
+	for job_index in range(1, _job_queue.size()):
+		if _job_queue[job_index].id > _job_queue[latest_index].id:
+			latest_index = job_index
+	var job: Dictionary = _job_queue[latest_index]
+	_job_queue.remove_at(latest_index)
+	_cancel_pending_job(job)
+
+
+func _cancel_pending_job(job: Dictionary) -> void:
+	var wait_seconds := (Time.get_ticks_msec() - job.accepted_msec) / 1000.0
+	_release_stock(job.pickup_marker, job.pickup_name)
+	_jobs_cancelled += 1
+	_record_job_result(job, "CANCELLED", 0.0, wait_seconds, "")
+	print("Job #%03d [%s] %s CANCELLED | Wait %.1fs" % [
+		job.id, _priority_name(job.priority), job.pickup_name, wait_seconds
+	])
+	_update_job_ui(_job_status_text())
+	_update_operations_ui()
 
 
 func _begin_job(job: Dictionary) -> void:
@@ -474,7 +516,7 @@ func _complete_job() -> void:
 		_sla_late += 1
 	_completed_execution_seconds += elapsed_seconds
 	_record_job_result(
-		"COMPLETE", elapsed_seconds, lead_seconds, _current_job_sla_seconds, sla_result
+		_current_job_dictionary(), "COMPLETE", elapsed_seconds, lead_seconds, sla_result
 	)
 	_current_job_started_msec = 0
 	_current_job_accepted_msec = 0
@@ -502,7 +544,7 @@ func _fail_job(reason: String) -> void:
 	var lead_seconds := _current_job_lead_seconds()
 	_jobs_failed += 1
 	_record_job_result(
-		"FAILED", elapsed_seconds, lead_seconds, _current_job_sla_seconds, "FAILED"
+		_current_job_dictionary(), "FAILED", elapsed_seconds, lead_seconds, "FAILED"
 	)
 	_current_job_started_msec = 0
 	_current_job_accepted_msec = 0
@@ -619,34 +661,46 @@ func _current_job_lead_seconds() -> float:
 
 
 func _record_job_result(
+		job: Dictionary,
 		status: String,
 		elapsed_seconds: float,
-		lead_seconds: float,
-		sla_seconds: float,
+		lead_or_wait_seconds: float,
 		sla_result: String
 ) -> void:
 	_recent_job_history.push_front({
-		"id": _current_job_id,
-		"pickup_name": _current_pickup_name,
-		"priority": _current_job_priority,
+		"id": job.id,
+		"pickup_name": job.pickup_name,
+		"priority": job.priority,
 		"status": status,
 		"duration": elapsed_seconds,
-		"lead_time": lead_seconds,
-		"sla_seconds": sla_seconds,
+		"lead_time": lead_or_wait_seconds,
+		"wait_time": lead_or_wait_seconds if status == "CANCELLED" else 0.0,
+		"sla_seconds": job.sla_seconds,
 		"sla_result": sla_result,
 	})
 	if _recent_job_history.size() > MAX_RECENT_JOB_HISTORY:
 		_recent_job_history.pop_back()
+	if status == "CANCELLED":
+		return
 	print("Job #%03d [%s] %s %s | Execution %.1fs | SLA %s %.1f/%.1fs" % [
-		_current_job_id,
-		_priority_name(_current_job_priority),
-		_current_pickup_name,
+		job.id,
+		_priority_name(job.priority),
+		job.pickup_name,
 		status,
 		elapsed_seconds,
 		sla_result,
-		lead_seconds,
-		sla_seconds,
+		lead_or_wait_seconds,
+		job.sla_seconds,
 	])
+
+
+func _current_job_dictionary() -> Dictionary:
+	return {
+		"id": _current_job_id,
+		"pickup_name": _current_pickup_name,
+		"priority": _current_job_priority,
+		"sla_seconds": _current_job_sla_seconds,
+	}
 
 
 func _update_operations_ui() -> void:
@@ -668,6 +722,7 @@ func _update_operations_ui() -> void:
 		"Accepted: %d" % _jobs_accepted,
 		"Completed: %d" % _jobs_completed,
 		"Failed: %d" % _jobs_failed,
+		"Cancelled: %d" % _jobs_cancelled,
 		"Active: %s" % active_text,
 		"Avg complete: %s" % average_text,
 		"SLA on-time: %d" % _sla_on_time,
@@ -682,6 +737,14 @@ func _update_operations_ui() -> void:
 	else:
 		for result in _recent_job_history:
 			var history_pickup_name: String = result.pickup_name.replace("Shelf Row ", "Row")
+			if result.status == "CANCELLED":
+				lines.append("#%03d [%s] %s CANCELLED wait %.1fs" % [
+					result.id,
+					_priority_name(result.priority),
+					history_pickup_name,
+					result.wait_time,
+				])
+				continue
 			var result_suffix := "" if result.status == "FAILED" else " %s" % result.sla_result
 			lines.append("#%03d [%s] %s %s %.1fs%s" % [
 				result.id,
@@ -732,9 +795,9 @@ func _has_autonomous_workload() -> bool:
 func _update_job_ui(status: String) -> void:
 	var queue_text := _queue_ui_text()
 	if _current_job_id == 0:
-		job_status_label.text = "Warehouse Jobs\n1–4: Normal jobs\nQ/W/E/R: High priority\nStatus: %s\n%s" % [status, queue_text]
+		job_status_label.text = "Warehouse Jobs\n1–4: Normal jobs\nQ/W/E/R: High priority\nCancel pending: [Z] next  [X] latest\nStatus: %s\n%s" % [status, queue_text]
 		return
-	job_status_label.text = "%s\nPriority: %s\nPick: %s\nDrop: Packing Station\nStatus: %s\n%s" % [
+	job_status_label.text = "%s\nPriority: %s\nPick: %s\nDrop: Packing Station\nCancel pending: [Z] next  [X] latest\nStatus: %s\n%s" % [
 		_current_job_label(), _priority_name(_current_job_priority),
 		_current_pickup_name, status, queue_text
 	]
