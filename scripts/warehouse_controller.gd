@@ -1,10 +1,10 @@
 extends Node3D
 
 @onready var navigation_region: NavigationRegion3D = $NavigationRegion3D
-@onready var floor_body: StaticBody3D = $Architecture/Floor
 @onready var robot: RobotController = $Robot01
 @onready var camera: Camera3D = $OverviewCamera
 @onready var destination_marker: MeshInstance3D = $DestinationMarker
+@onready var movement_panel: PanelContainer = $MovementUI/Panel
 @onready var status_label: Label = $MovementUI/Panel/Margin/Readout
 
 var _navigation_ready := false
@@ -80,30 +80,50 @@ func _navigation_failed(stage: String, detail: String) -> void:
 	status_label.text = "Robot01\nStatus: Navigation unavailable\nSpeed: 0.00 m/s\nDestination: —"
 
 
-func _unhandled_input(event: InputEvent) -> void:
+func _input(event: InputEvent) -> void:
 	if not _navigation_ready or not event is InputEventMouseButton:
 		return
 	var mouse_event := event as InputEventMouseButton
 	if mouse_event.button_index != MOUSE_BUTTON_LEFT or not mouse_event.pressed:
 		return
+	print("Click received: (%.1f, %.1f)" % [mouse_event.position.x, mouse_event.position.y])
 	var ray_origin := camera.project_ray_origin(mouse_event.position)
 	var ray_end := ray_origin + camera.project_ray_normal(mouse_event.position) * 100.0
 	var query := PhysicsRayQueryParameters3D.create(ray_origin, ray_end)
 	query.collide_with_areas = false
 	var hit := get_world_3d().direct_space_state.intersect_ray(query)
-	if hit.is_empty() or hit["collider"] != floor_body:
+	if hit.is_empty():
+		print("Raycast missed")
 		return
+	var collider := hit["collider"] as CollisionObject3D
+	print("Raycast hit: %s" % collider.get_path())
 	var clicked_position: Vector3 = hit["position"]
+	print("Clicked world position: %s" % _format_vector3(clicked_position))
+	if movement_panel.get_global_rect().has_point(mouse_event.position):
+		print("Destination rejected: click is over the movement UI")
+		return
+	if not collider.is_in_group("warehouse_floor"):
+		print("Destination rejected: collider is not warehouse floor")
+		return
 	var navigation_map := navigation_region.get_navigation_map()
 	var valid_position := NavigationServer3D.map_get_closest_point(navigation_map, clicked_position)
+	var snap_distance := valid_position.distance_to(clicked_position)
+	print("Navigation closest point: %s" % _format_vector3(valid_position))
+	print("Navigation snap distance: %.3f" % snap_distance)
 	# A point far from the closest polygon lies under an obstacle or off the mesh.
-	if valid_position.distance_to(clicked_position) > 0.4:
+	if snap_distance > 0.4:
+		print("Destination rejected: navigation snap distance exceeds 0.4")
 		return
 	valid_position.y = 0.0
+	print("Destination accepted: %s" % _format_vector3(valid_position))
 	destination_marker.global_position = valid_position + Vector3.UP * 0.04
 	destination_marker.visible = true
 	robot.set_navigation_target(valid_position)
 	get_viewport().set_input_as_handled()
+
+
+func _format_vector3(value: Vector3) -> String:
+	return "(%.3f, %.3f, %.3f)" % [value.x, value.y, value.z]
 
 
 func _on_robot_movement_changed(status: String, speed: float, destination: Vector3) -> void:
