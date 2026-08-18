@@ -366,3 +366,25 @@ theme_override_constants/margin_bottom = 10
 text = "Warehouse Jobs\nPress 1: Shelf Row 01\nPress 2: Shelf Row 02\nPress 3: Shelf Row 03\nPress 4: Shelf Row 04\nStatus: Preparing navigation...\nPending: 0/5"
 theme_override_colors/font_color = Color(0.9, 0.96, 1, 1)
 theme_override_font_sizes/font_size = 16
+
+[node name="InventoryUI" type="CanvasLayer" parent="."]
+[node name="Panel" type="PanelContainer" parent="InventoryUI"]
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -190.0
+offset_top = 16.0
+offset_right = -16.0
+offset_bottom = 154.0
+grow_horizontal = 0
+mouse_filter = 1
+theme_override_styles/panel = SubResource("PanelStyle")
+[node name="Margin" type="MarginContainer" parent="InventoryUI/Panel"]
+theme_override_constants/margin_left = 14
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 14
+theme_override_constants/margin_bottom = 10
+[node name="Readout" type="Label" parent="InventoryUI/Panel/Margin"]
+text = "Available Stock\nShelf 01: 3\nShelf 02: 3\nShelf 03: 3\nShelf 04: 3"
+theme_override_colors/font_color = Color(0.9, 0.96, 1, 1)
+theme_override_font_sizes/font_size = 16
