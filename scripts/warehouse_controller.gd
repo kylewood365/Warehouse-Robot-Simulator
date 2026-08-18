@@ -14,31 +14,70 @@ func _ready() -> void:
 	robot.movement_changed.connect(_on_robot_movement_changed)
 	destination_marker.visible = false
 	status_label.text = "Robot01\nStatus: Preparing navigation...\nSpeed: 0.00 m/s\nDestination: —"
-	# This synchronous bake runs once. STATIC_COLLIDERS includes the floor, walls,
-	# shelves, and stations while excluding the movable CharacterBody3D robot.
-	navigation_region.bake_navigation_mesh(false)
-	print("Navigation bake completed")
-	await get_tree().physics_frame
+	# Parsing touches the SceneTree, so wait until every child in the warehouse scene
+	# has completed its ready step before collecting the grouped static colliders.
+	call_deferred("_build_navigation")
+
+
+func _build_navigation() -> void:
 	var navigation_mesh := navigation_region.navigation_mesh
-	var navigation_map := navigation_region.get_navigation_map()
-	var map_regions := NavigationServer3D.map_get_regions(navigation_map)
-	var has_usable_geometry := (
-		navigation_mesh != null
-		and not navigation_mesh.get_vertices().is_empty()
-		and navigation_mesh.get_polygon_count() > 0
-		and map_regions.has(navigation_region.get_rid())
-	)
-	if not has_usable_geometry:
-		push_error("Navigation bake produced no usable navigation geometry; click-to-move is disabled")
-		status_label.text = "Robot01\nStatus: Navigation unavailable\nSpeed: 0.00 m/s\nDestination: —"
+	if navigation_mesh == null:
+		_navigation_failed("navigation mesh baking", "NavigationRegion3D has no NavigationMesh")
 		return
-	_navigation_ready = true
+
+	var source_nodes := get_tree().get_nodes_in_group("navigation_source")
+	print("Navigation source group nodes: %d" % source_nodes.size())
+	if source_nodes.is_empty():
+		_navigation_failed("group discovery", "the navigation_source group is empty")
+		return
+
+	var source_geometry := NavigationMeshSourceGeometryData3D.new()
+	# `self` is the Warehouse scene root. Group filtering on the NavigationMesh
+	# selects Architecture, Shelving, and Stations and includes their children.
+	NavigationServer3D.parse_source_geometry_data(navigation_mesh, source_geometry, self)
+	var source_vertices := source_geometry.get_vertices()
+	var source_indices := source_geometry.get_indices()
+	print(
+		"Navigation source data: %d vertices, %d indices"
+		% [source_vertices.size(), source_indices.size()]
+	)
+	if not source_geometry.has_data():
+		for source_node in source_nodes:
+			print("Navigation source node: %s" % source_node.get_path())
+		_navigation_failed("source geometry parsing", "group nodes produced no collider data")
+		return
+
+	NavigationServer3D.bake_from_source_geometry_data(navigation_mesh, source_geometry)
+	if navigation_mesh.get_vertices().is_empty() or navigation_mesh.get_polygon_count() == 0:
+		_navigation_failed("navigation mesh baking", "parsed data produced no usable polygons")
+		return
+	print("Navigation bake completed")
 	print(
 		"Navigation mesh: %d vertices, %d polygons"
 		% [navigation_mesh.get_vertices().size(), navigation_mesh.get_polygon_count()]
 	)
+
+	# Keep both the scene node and its NavigationServer region synchronized with
+	# the resource that was populated by the explicit bake.
+	navigation_region.navigation_mesh = navigation_mesh
+	NavigationServer3D.region_set_navigation_mesh(navigation_region.get_rid(), navigation_mesh)
+	await get_tree().physics_frame
+	var navigation_map := navigation_region.get_navigation_map()
+	var map_regions := NavigationServer3D.map_get_regions(navigation_map)
+	if not map_regions.has(navigation_region.get_rid()):
+		_navigation_failed("region registration", "baked region is not registered on its navigation map")
+		return
+	_navigation_ready = true
 	print("Navigation ready")
 	_on_robot_movement_changed("Idle", 0.0, Vector3.ZERO)
+
+
+func _navigation_failed(stage: String, detail: String) -> void:
+	push_error(
+		"Navigation failed during %s: %s; click-to-move is disabled"
+		% [stage, detail]
+	)
+	status_label.text = "Robot01\nStatus: Navigation unavailable\nSpeed: 0.00 m/s\nDestination: —"
 
 
 func _unhandled_input(event: InputEvent) -> void:
