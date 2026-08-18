@@ -9,6 +9,11 @@ enum JobState {
 	FAILED,
 }
 
+enum JobPriority {
+	NORMAL,
+	HIGH,
+}
+
 const JOB_TARGET_MAX_HORIZONTAL_SNAP := 0.75
 const MAX_PENDING_JOBS := 5
 const INITIAL_STOCK_PER_SHELF := 3
@@ -51,6 +56,7 @@ var _navigation_ready := false
 var _job_state := JobState.IDLE
 var _next_job_id := 1
 var _current_job_id := 0
+var _current_job_priority := JobPriority.NORMAL
 var _current_pickup_marker: Marker3D
 var _current_pickup_name := ""
 var _current_source_package: MeshInstance3D
@@ -151,6 +157,7 @@ func _input(event: InputEvent) -> void:
 			var selected_pickup: Marker3D
 			var selected_name := ""
 			var is_restock := false
+			var priority := JobPriority.NORMAL
 			match key_event.keycode:
 				KEY_1:
 					selected_pickup = shelf_01_pickup
@@ -164,6 +171,22 @@ func _input(event: InputEvent) -> void:
 				KEY_4:
 					selected_pickup = shelf_04_pickup
 					selected_name = "Shelf Row 04"
+				KEY_Q:
+					selected_pickup = shelf_01_pickup
+					selected_name = "Shelf Row 01"
+					priority = JobPriority.HIGH
+				KEY_W:
+					selected_pickup = shelf_02_pickup
+					selected_name = "Shelf Row 02"
+					priority = JobPriority.HIGH
+				KEY_E:
+					selected_pickup = shelf_03_pickup
+					selected_name = "Shelf Row 03"
+					priority = JobPriority.HIGH
+				KEY_R:
+					selected_pickup = shelf_04_pickup
+					selected_name = "Shelf Row 04"
+					priority = JobPriority.HIGH
 				KEY_5:
 					selected_pickup = shelf_01_pickup
 					selected_name = "Shelf Row 01"
@@ -184,7 +207,7 @@ func _input(event: InputEvent) -> void:
 				if is_restock:
 					_request_restock(selected_pickup, selected_name)
 				else:
-					_request_job(selected_pickup, selected_name)
+					_request_job(selected_pickup, selected_name, priority)
 				get_viewport().set_input_as_handled()
 		return
 
@@ -242,7 +265,11 @@ func _input(event: InputEvent) -> void:
 	get_viewport().set_input_as_handled()
 
 
-func _request_job(pickup_marker: Marker3D, pickup_name: String) -> void:
+func _request_job(
+		pickup_marker: Marker3D,
+		pickup_name: String,
+		priority: int = JobPriority.NORMAL
+) -> void:
 	if not _navigation_ready:
 		print("Job start unavailable: navigation is not ready")
 		return
@@ -261,22 +288,37 @@ func _request_job(pickup_marker: Marker3D, pickup_name: String) -> void:
 		"id": _next_job_id,
 		"pickup_marker": pickup_marker,
 		"pickup_name": pickup_name,
+		"priority": priority,
 	}
 	_next_job_id += 1
 	if not _is_job_active() and _job_queue.is_empty():
 		_begin_job(job)
 		return
 
-	_job_queue.append(job)
-	print("Job #%03d queued: %s" % [job.id, job.pickup_name])
+	_enqueue_job_by_priority(job)
+	print("Job #%03d queued: %s [%s]" % [
+		job.id, job.pickup_name, _priority_name(job.priority)
+	])
 	print("Pending jobs: %d/%d" % [_job_queue.size(), MAX_PENDING_JOBS])
 	_update_job_ui(_job_status_text())
 	if not _is_job_active():
 		_schedule_next_queued_job()
 
 
+func _enqueue_job_by_priority(job: Dictionary) -> void:
+	if job.priority == JobPriority.NORMAL:
+		_job_queue.append(job)
+		return
+	var insertion_index := 0
+	while insertion_index < _job_queue.size() \
+			and _job_queue[insertion_index].priority == JobPriority.HIGH:
+		insertion_index += 1
+	_job_queue.insert(insertion_index, job)
+
+
 func _begin_job(job: Dictionary) -> void:
 	_current_job_id = job.id
+	_current_job_priority = job.priority
 	_current_pickup_marker = job.pickup_marker
 	_current_pickup_name = job.pickup_name
 	_current_stock_reserved = true
@@ -285,7 +327,9 @@ func _begin_job(job: Dictionary) -> void:
 	if _current_source_package != null:
 		_current_source_package.visible = true
 	_job_state = JobState.TRAVELLING_TO_PICKUP
-	print("%s started" % _current_job_label())
+	print("%s started [%s]" % [
+		_current_job_label(), _priority_name(_current_job_priority)
+	])
 	print("Pickup: %s" % _current_pickup_name)
 	_update_job_ui("Travelling to %s" % _current_pickup_name)
 	_command_job_target(_current_pickup_marker, _current_pickup_name)
@@ -303,7 +347,9 @@ func _start_next_queued_job() -> void:
 	if not _navigation_ready or _is_job_active() or _job_queue.is_empty():
 		return
 	var job: Dictionary = _job_queue.pop_front()
-	print("Starting queued Job #%03d: %s" % [job.id, job.pickup_name])
+	print("Starting queued Job #%03d: %s [%s]" % [
+		job.id, job.pickup_name, _priority_name(job.priority)
+	])
 	_begin_job(job)
 
 
@@ -549,10 +595,11 @@ func _has_autonomous_workload() -> bool:
 func _update_job_ui(status: String) -> void:
 	var queue_text := _queue_ui_text()
 	if _current_job_id == 0:
-		job_status_label.text = "Warehouse Jobs\nPress 1: Shelf Row 01\nPress 2: Shelf Row 02\nPress 3: Shelf Row 03\nPress 4: Shelf Row 04\nStatus: %s\n%s" % [status, queue_text]
+		job_status_label.text = "Warehouse Jobs\n1–4: Normal jobs\nQ/W/E/R: High priority\nStatus: %s\n%s" % [status, queue_text]
 		return
-	job_status_label.text = "%s\nPick: %s\nDrop: Packing Station\nStatus: %s\n%s" % [
-		_current_job_label(), _current_pickup_name, status, queue_text
+	job_status_label.text = "%s\nPriority: %s\nPick: %s\nDrop: Packing Station\nStatus: %s\n%s" % [
+		_current_job_label(), _priority_name(_current_job_priority),
+		_current_pickup_name, status, queue_text
 	]
 
 
@@ -561,9 +608,17 @@ func _queue_ui_text() -> String:
 		"Pending: %d/%d" % [_job_queue.size(), MAX_PENDING_JOBS]
 	]
 	if _job_queue.size() >= 1:
-		lines.append("Next: #%03d %s" % [_job_queue[0].id, _job_queue[0].pickup_name])
+		lines.append("Next: #%03d [%s] %s" % [
+			_job_queue[0].id,
+			_priority_name(_job_queue[0].priority),
+			_job_queue[0].pickup_name,
+		])
 	if _job_queue.size() >= 2:
-		lines.append("Then: #%03d %s" % [_job_queue[1].id, _job_queue[1].pickup_name])
+		lines.append("Then: #%03d [%s] %s" % [
+			_job_queue[1].id,
+			_priority_name(_job_queue[1].priority),
+			_job_queue[1].pickup_name,
+		])
 	if _job_queue.size() > 2:
 		lines.append("+%d more" % (_job_queue.size() - 2))
 	return "\n".join(lines)
@@ -587,6 +642,10 @@ func _job_status_text() -> String:
 
 func _current_job_label() -> String:
 	return "Job #%03d" % _current_job_id
+
+
+func _priority_name(priority: int) -> String:
+	return "HIGH" if priority == JobPriority.HIGH else "NORMAL"
 
 
 func _format_vector3(value: Vector3) -> String:
