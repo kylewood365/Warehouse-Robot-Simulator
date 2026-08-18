@@ -2,15 +2,27 @@
 
 A lightweight 3D warehouse environment for experimenting with autonomous warehouse robotics in Godot. The project intentionally uses only built-in primitive meshes and simple materials so it remains suitable for the GL Compatibility renderer and older hardware.
 
-## Phase 1
+## Phase 2
 
 - A concrete-style floor and four collidable outer walls
 - Four reusable, collidable shelving rows with packages and wide drive aisles
-- A stationary autonomous mobile robot (`Robot01`)
+- A single autonomous mobile robot (`Robot01`) with smooth path following
 - Dedicated packing/drop-off and charging stations
 - Overview camera, aisle markings, and compatibility-friendly directional lighting
 
-Movement, navigation, battery simulation, and robot AI are deliberately reserved for later phases.
+- Runtime-baked 3D navigation using the warehouse's static collision geometry
+- Click-to-move destinations with an in-world marker and movement status overlay
+
+This phase is intentionally limited to single-robot navigation. Multiple robots,
+batteries, charging behavior, pickup jobs, package carrying, task scheduling, and
+advanced avoidance are reserved for later phases.
+
+## Controls
+
+- **Left click** a valid warehouse floor location to set `Robot01`'s destination.
+- Click another valid floor location at any time to update the destination.
+
+Clicks on shelves, stations, walls, or outside the navigable floor are ignored.
 
 ## Requirements
 

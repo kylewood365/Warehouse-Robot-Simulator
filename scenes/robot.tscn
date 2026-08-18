@@ -1,4 +1,6 @@
-[gd_scene load_steps=8 format=3]
+[gd_scene load_steps=9 format=3]
+
+[ext_resource type="Script" path="res://scripts/robot_controller.gd" id="1_controller"]
 
 [sub_resource type="StandardMaterial3D" id="BodyMaterial"]
 albedo_color = Color(0.95, 0.53, 0.08, 1)
@@ -30,7 +32,8 @@ top_radius = 0.2
 bottom_radius = 0.25
 height = 0.28
 
-[node name="Robot01" type="StaticBody3D"]
+[node name="Robot01" type="CharacterBody3D"]
+script = ExtResource("1_controller")
 [node name="CollisionShape3D" type="CollisionShape3D" parent="."]
 position = Vector3(0, 0.46, 0)
 shape = SubResource("BodyShape")
@@ -53,3 +56,10 @@ position = Vector3(0.82, 0.25, 0)
 rotation_degrees = Vector3(0, 0, 90)
 mesh = SubResource("SensorMesh")
 material_override = SubResource("DarkMaterial")
+
+[node name="NavigationAgent3D" type="NavigationAgent3D" parent="."]
+path_desired_distance = 0.25
+target_desired_distance = 0.3
+radius = 0.95
+height = 1.2
+path_height_offset = 0.0
