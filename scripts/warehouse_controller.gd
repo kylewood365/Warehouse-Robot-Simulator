@@ -21,6 +21,12 @@ const MAX_PENDING_JOBS := 5
 @onready var shelf_03_pickup: Marker3D = $JobTargets/Shelf03Pickup
 @onready var shelf_04_pickup: Marker3D = $JobTargets/Shelf04Pickup
 @onready var packing_dropoff: Marker3D = $JobTargets/PackingDropoff
+@onready var shelf_01_source_package: MeshInstance3D = $Shelving/ShelfRow01/PackageD
+@onready var shelf_02_source_package: MeshInstance3D = $Shelving/ShelfRow02/PackageD
+@onready var shelf_03_source_package: MeshInstance3D = $Shelving/ShelfRow03/PackageD
+@onready var shelf_04_source_package: MeshInstance3D = $Shelving/ShelfRow04/PackageD
+@onready var carried_package: MeshInstance3D = $Robot01/CargoMount/CarriedPackage
+@onready var delivered_package: MeshInstance3D = $JobVisuals/DeliveredPackage
 @onready var movement_panel: PanelContainer = $MovementUI/Panel
 @onready var status_label: Label = $MovementUI/Panel/Margin/Readout
 @onready var job_panel: PanelContainer = $JobUI/Panel
@@ -32,8 +38,10 @@ var _next_job_id := 1
 var _current_job_id := 0
 var _current_pickup_marker: Marker3D
 var _current_pickup_name := ""
+var _current_source_package: MeshInstance3D
 var _job_queue: Array[Dictionary] = []
 var _queued_start_scheduled := false
+var _delivery_flash_id := 0
 
 
 func _ready() -> void:
@@ -220,6 +228,10 @@ func _begin_job(job: Dictionary) -> void:
 	_current_job_id = job.id
 	_current_pickup_marker = job.pickup_marker
 	_current_pickup_name = job.pickup_name
+	carried_package.visible = false
+	_current_source_package = _get_source_package_for_pickup(_current_pickup_marker)
+	if _current_source_package != null:
+		_current_source_package.visible = true
 	_job_state = JobState.TRAVELLING_TO_PICKUP
 	print("%s started" % _current_job_label())
 	print("Pickup: %s" % _current_pickup_name)
@@ -315,6 +327,10 @@ func _begin_pickup() -> void:
 	await get_tree().create_timer(1.0).timeout
 	if _job_state != JobState.PICKING:
 		return
+	if _current_source_package != null:
+		_current_source_package.visible = false
+	carried_package.visible = true
+	print("%s package loaded" % _current_job_label())
 	_begin_delivery()
 
 
@@ -325,6 +341,11 @@ func _begin_delivery() -> void:
 
 
 func _complete_job() -> void:
+	carried_package.visible = false
+	if _current_source_package != null:
+		_current_source_package.visible = true
+	print("%s package delivered" % _current_job_label())
+	_show_delivered_package_briefly()
 	_job_state = JobState.COMPLETE
 	_update_job_ui("Complete")
 	print("%s complete" % _current_job_label())
@@ -332,10 +353,36 @@ func _complete_job() -> void:
 
 
 func _fail_job(reason: String) -> void:
+	carried_package.visible = false
+	if _current_source_package != null:
+		_current_source_package.visible = true
+	_delivery_flash_id += 1
+	delivered_package.visible = false
 	_job_state = JobState.FAILED
 	_update_job_ui("Failed")
 	print("%s failed: %s" % [_current_job_label(), reason])
 	_schedule_next_queued_job()
+
+
+func _get_source_package_for_pickup(marker: Marker3D) -> MeshInstance3D:
+	if marker == shelf_01_pickup:
+		return shelf_01_source_package
+	if marker == shelf_02_pickup:
+		return shelf_02_source_package
+	if marker == shelf_03_pickup:
+		return shelf_03_source_package
+	if marker == shelf_04_pickup:
+		return shelf_04_source_package
+	return null
+
+
+func _show_delivered_package_briefly() -> void:
+	_delivery_flash_id += 1
+	var flash_id := _delivery_flash_id
+	delivered_package.visible = true
+	await get_tree().create_timer(0.75).timeout
+	if flash_id == _delivery_flash_id:
+		delivered_package.visible = false
 
 
 func _is_job_active() -> bool:
