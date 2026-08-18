@@ -117,9 +117,12 @@ func _input(event: InputEvent) -> void:
 	if snap_distance > 0.4:
 		print("Destination rejected: navigation snap distance exceeds 0.4")
 		return
-	valid_position.y = 0.0
 	print("Destination accepted: %s" % _format_vector3(valid_position))
-	destination_marker.global_position = valid_position + Vector3.UP * 0.04
+	# The agent needs the point on the navigation surface, but the marker belongs
+	# on the physical floor that was clicked.
+	destination_marker.global_position = Vector3(
+		valid_position.x, clicked_position.y + 0.04, valid_position.z
+	)
 	destination_marker.visible = true
 	robot.set_navigation_target(valid_position)
 	get_viewport().set_input_as_handled()
