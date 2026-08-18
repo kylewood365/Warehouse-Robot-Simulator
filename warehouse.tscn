@@ -8,9 +8,9 @@
 
 [sub_resource type="NavigationMesh" id="WarehouseNavigationMesh"]
 sample_partition_type = 2
-parsed_geometry_type = 1
-source_geometry_mode = 1
-source_geometry_group_name = &"navigation_source"
+geometry_parsed_geometry_type = 1
+geometry_source_geometry_mode = 1
+geometry_source_group_name = &"navigation_source"
 agent_radius = 1.0
 agent_height = 1.2
 agent_max_climb = 0.25
