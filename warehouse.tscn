@@ -1,4 +1,4 @@
-[gd_scene load_steps=20 format=3 uid="uid://cby2cbm7o72yy"]
+[gd_scene load_steps=25 format=3 uid="uid://cby2cbm7o72yy"]
 
 [ext_resource type="PackedScene" path="res://scenes/shelf_unit.tscn" id="1_shelf"]
 [ext_resource type="PackedScene" path="res://scenes/robot.tscn" id="2_robot"]
@@ -19,14 +19,38 @@ cell_size = 0.25
 cell_height = 0.25
 
 [sub_resource type="StandardMaterial3D" id="FloorMaterial"]
-albedo_color = Color(0.42, 0.44, 0.45, 1)
-roughness = 0.95
+albedo_color = Color(0.235, 0.265, 0.29, 1)
+metallic = 0.05
+roughness = 0.92
 [sub_resource type="StandardMaterial3D" id="WallMaterial"]
-albedo_color = Color(0.73, 0.77, 0.78, 1)
+albedo_color = Color(0.68, 0.73, 0.76, 1)
 roughness = 0.85
 [sub_resource type="StandardMaterial3D" id="StripeMaterial"]
 albedo_color = Color(0.94, 0.7, 0.08, 1)
 roughness = 0.75
+[sub_resource type="StandardMaterial3D" id="LaneMaterial"]
+albedo_color = Color(0.82, 0.84, 0.81, 1)
+roughness = 0.82
+[sub_resource type="StandardMaterial3D" id="LowerWallMaterial"]
+albedo_color = Color(0.19, 0.24, 0.28, 1)
+roughness = 0.76
+[sub_resource type="StandardMaterial3D" id="FixtureHousingMaterial"]
+albedo_color = Color(0.14, 0.18, 0.21, 1)
+metallic = 0.65
+roughness = 0.38
+[sub_resource type="StandardMaterial3D" id="FixtureGlowMaterial"]
+albedo_color = Color(0.88, 0.95, 1, 1)
+emission_enabled = true
+emission = Color(0.68, 0.84, 1, 1)
+emission_energy_multiplier = 1.45
+[sub_resource type="Environment" id="WarehouseEnvironment"]
+background_mode = 1
+background_color = Color(0.105, 0.135, 0.165, 1)
+background_energy_multiplier = 0.8
+ambient_light_source = 3
+ambient_light_color = Color(0.55, 0.64, 0.72, 1)
+ambient_light_energy = 0.62
+ambient_light_sky_contribution = 0.0
 [sub_resource type="BoxMesh" id="FloorMesh"]
 material = SubResource("FloorMaterial")
 size = Vector3(30, 0.3, 24)
@@ -62,6 +86,9 @@ corner_radius_bottom_left = 6
 
 [node name="Warehouse" type="Node3D"]
 script = ExtResource("5_controller")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("WarehouseEnvironment")
 
 [node name="NavigationRegion3D" type="NavigationRegion3D" parent="."]
 navigation_mesh = SubResource("WarehouseNavigationMesh")
@@ -119,17 +146,132 @@ rotation_degrees = Vector3(0, 180, 0)
 [node name="Robot01" parent="." instance=ExtResource("2_robot")]
 position = Vector3(0, 0, 7.8)
 
-[node name="AisleMarkings" type="Node3D" parent="."]
-[node name="PackingZone" type="MeshInstance3D" parent="AisleMarkings"]
+[node name="VisualPolish" type="Node3D" parent="."]
+[node name="FloorMarkings" type="Node3D" parent="VisualPolish"]
+[node name="PackingZone" type="MeshInstance3D" parent="VisualPolish/FloorMarkings"]
 position = Vector3(-10.5, 0.012, 7.2)
 mesh = SubResource("UnitBoxMesh")
 scale = Vector3(4.4, 0.025, 0.12)
 material_override = SubResource("StripeMaterial")
-[node name="ChargingZone" type="MeshInstance3D" parent="AisleMarkings"]
+[node name="ChargingZone" type="MeshInstance3D" parent="VisualPolish/FloorMarkings"]
 position = Vector3(11, 0.012, -8.6)
 mesh = SubResource("UnitBoxMesh")
 scale = Vector3(3.2, 0.025, 0.12)
 material_override = SubResource("StripeMaterial")
+[node name="CentralLaneLeft" type="MeshInstance3D" parent="VisualPolish/FloorMarkings"]
+position = Vector3(-1.75, 0.014, 4.9)
+mesh = SubResource("UnitBoxMesh")
+scale = Vector3(0.09, 0.024, 10.2)
+material_override = SubResource("LaneMaterial")
+[node name="CentralLaneRight" type="MeshInstance3D" parent="VisualPolish/FloorMarkings"]
+position = Vector3(1.75, 0.014, 4.9)
+mesh = SubResource("UnitBoxMesh")
+scale = Vector3(0.09, 0.024, 10.2)
+material_override = SubResource("LaneMaterial")
+[node name="CrossLane" type="MeshInstance3D" parent="VisualPolish/FloorMarkings"]
+position = Vector3(0, 0.014, 5.8)
+mesh = SubResource("UnitBoxMesh")
+scale = Vector3(23.5, 0.024, 0.09)
+material_override = SubResource("LaneMaterial")
+[node name="PackingZoneLeft" type="MeshInstance3D" parent="VisualPolish/FloorMarkings"]
+position = Vector3(-12.7, 0.014, 9.25)
+mesh = SubResource("UnitBoxMesh")
+scale = Vector3(0.1, 0.024, 4.1)
+material_override = SubResource("StripeMaterial")
+[node name="PackingZoneRight" type="MeshInstance3D" parent="VisualPolish/FloorMarkings"]
+position = Vector3(-8.3, 0.014, 9.25)
+mesh = SubResource("UnitBoxMesh")
+scale = Vector3(0.1, 0.024, 4.1)
+material_override = SubResource("StripeMaterial")
+[node name="ChargingZoneLeft" type="MeshInstance3D" parent="VisualPolish/FloorMarkings"]
+position = Vector3(9.4, 0.014, -9.9)
+mesh = SubResource("UnitBoxMesh")
+scale = Vector3(0.1, 0.024, 3.2)
+material_override = SubResource("StripeMaterial")
+[node name="ChargingZoneRight" type="MeshInstance3D" parent="VisualPolish/FloorMarkings"]
+position = Vector3(12.6, 0.014, -9.9)
+mesh = SubResource("UnitBoxMesh")
+scale = Vector3(0.1, 0.024, 3.2)
+material_override = SubResource("StripeMaterial")
+
+[node name="WallDetails" type="Node3D" parent="VisualPolish"]
+[node name="NorthLowerBand" type="MeshInstance3D" parent="VisualPolish/WallDetails"]
+position = Vector3(0, 0.65, -11.8)
+mesh = SubResource("UnitBoxMesh")
+scale = Vector3(29.6, 1.05, 0.025)
+material_override = SubResource("LowerWallMaterial")
+[node name="SouthLowerBand" type="MeshInstance3D" parent="VisualPolish/WallDetails"]
+position = Vector3(0, 0.65, 11.8)
+mesh = SubResource("UnitBoxMesh")
+scale = Vector3(29.6, 1.05, 0.025)
+material_override = SubResource("LowerWallMaterial")
+[node name="WestLowerBand" type="MeshInstance3D" parent="VisualPolish/WallDetails"]
+position = Vector3(-14.8, 0.65, 0)
+mesh = SubResource("UnitBoxMesh")
+scale = Vector3(0.025, 1.05, 23.6)
+material_override = SubResource("LowerWallMaterial")
+[node name="EastLowerBand" type="MeshInstance3D" parent="VisualPolish/WallDetails"]
+position = Vector3(14.8, 0.65, 0)
+mesh = SubResource("UnitBoxMesh")
+scale = Vector3(0.025, 1.05, 23.6)
+material_override = SubResource("LowerWallMaterial")
+
+[node name="OverheadFixtures" type="Node3D" parent="VisualPolish"]
+[node name="LightBar01Housing" type="MeshInstance3D" parent="VisualPolish/OverheadFixtures"]
+position = Vector3(-12, 5.4, 0)
+mesh = SubResource("UnitBoxMesh")
+scale = Vector3(0.4, 0.16, 8.5)
+material_override = SubResource("FixtureHousingMaterial")
+[node name="LightBar01Strip" type="MeshInstance3D" parent="VisualPolish/OverheadFixtures"]
+position = Vector3(-12, 5.3, 0)
+mesh = SubResource("UnitBoxMesh")
+scale = Vector3(0.22, 0.04, 7.9)
+material_override = SubResource("FixtureGlowMaterial")
+cast_shadow = 0
+[node name="LightBar02Housing" type="MeshInstance3D" parent="VisualPolish/OverheadFixtures"]
+position = Vector3(-6, 5.4, 0)
+mesh = SubResource("UnitBoxMesh")
+scale = Vector3(0.4, 0.16, 8.5)
+material_override = SubResource("FixtureHousingMaterial")
+[node name="LightBar02Strip" type="MeshInstance3D" parent="VisualPolish/OverheadFixtures"]
+position = Vector3(-6, 5.3, 0)
+mesh = SubResource("UnitBoxMesh")
+scale = Vector3(0.22, 0.04, 7.9)
+material_override = SubResource("FixtureGlowMaterial")
+cast_shadow = 0
+[node name="LightBar03Housing" type="MeshInstance3D" parent="VisualPolish/OverheadFixtures"]
+position = Vector3(0, 5.4, 0)
+mesh = SubResource("UnitBoxMesh")
+scale = Vector3(0.4, 0.16, 8.5)
+material_override = SubResource("FixtureHousingMaterial")
+[node name="LightBar03Strip" type="MeshInstance3D" parent="VisualPolish/OverheadFixtures"]
+position = Vector3(0, 5.3, 0)
+mesh = SubResource("UnitBoxMesh")
+scale = Vector3(0.22, 0.04, 7.9)
+material_override = SubResource("FixtureGlowMaterial")
+cast_shadow = 0
+[node name="LightBar04Housing" type="MeshInstance3D" parent="VisualPolish/OverheadFixtures"]
+position = Vector3(6, 5.4, 0)
+mesh = SubResource("UnitBoxMesh")
+scale = Vector3(0.4, 0.16, 8.5)
+material_override = SubResource("FixtureHousingMaterial")
+[node name="LightBar04Strip" type="MeshInstance3D" parent="VisualPolish/OverheadFixtures"]
+position = Vector3(6, 5.3, 0)
+mesh = SubResource("UnitBoxMesh")
+scale = Vector3(0.22, 0.04, 7.9)
+material_override = SubResource("FixtureGlowMaterial")
+cast_shadow = 0
+[node name="LightBar05Housing" type="MeshInstance3D" parent="VisualPolish/OverheadFixtures"]
+position = Vector3(12, 5.4, 0)
+mesh = SubResource("UnitBoxMesh")
+scale = Vector3(0.4, 0.16, 8.5)
+material_override = SubResource("FixtureHousingMaterial")
+[node name="LightBar05Strip" type="MeshInstance3D" parent="VisualPolish/OverheadFixtures"]
+position = Vector3(12, 5.3, 0)
+mesh = SubResource("UnitBoxMesh")
+scale = Vector3(0.22, 0.04, 7.9)
+material_override = SubResource("FixtureGlowMaterial")
+cast_shadow = 0
 
 [node name="DestinationMarker" type="MeshInstance3D" parent="."]
 mesh = SubResource("DestinationMesh")
@@ -139,12 +281,25 @@ cast_shadow = 0
 [node name="SunLight" type="DirectionalLight3D" parent="Lighting"]
 rotation_degrees = Vector3(-58, -28, 0)
 light_color = Color(1, 0.95, 0.84, 1)
-light_energy = 1.15
+light_energy = 1.28
 shadow_enabled = true
 [node name="FillLight" type="DirectionalLight3D" parent="Lighting"]
 rotation_degrees = Vector3(-70, 145, 0)
-light_color = Color(0.65, 0.78, 1, 1)
-light_energy = 0.45
+light_color = Color(0.68, 0.82, 1, 1)
+light_energy = 0.38
+[node name="WarehouseLights" type="Node3D" parent="Lighting"]
+[node name="WestAisleLight" type="OmniLight3D" parent="Lighting/WarehouseLights"]
+position = Vector3(-7.5, 4.8, 0.5)
+light_color = Color(0.72, 0.86, 1, 1)
+light_energy = 1.05
+omni_range = 7.5
+shadow_enabled = false
+[node name="EastAisleLight" type="OmniLight3D" parent="Lighting/WarehouseLights"]
+position = Vector3(7.5, 4.8, 0.5)
+light_color = Color(0.72, 0.86, 1, 1)
+light_energy = 1.05
+omni_range = 7.5
+shadow_enabled = false
 
 [node name="OverviewCamera" type="Camera3D" parent="."]
 position = Vector3(0, 24, 27)

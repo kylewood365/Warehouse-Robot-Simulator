@@ -1,18 +1,25 @@
-[gd_scene load_steps=9 format=3]
+[gd_scene load_steps=11 format=3]
 
 [ext_resource type="Script" path="res://scripts/robot_controller.gd" id="1_controller"]
 
 [sub_resource type="StandardMaterial3D" id="BodyMaterial"]
 albedo_color = Color(0.95, 0.53, 0.08, 1)
 roughness = 0.55
+metallic = 0.28
 [sub_resource type="StandardMaterial3D" id="DarkMaterial"]
 albedo_color = Color(0.035, 0.05, 0.065, 1)
-roughness = 0.45
+roughness = 0.32
+metallic = 0.62
 [sub_resource type="StandardMaterial3D" id="SensorMaterial"]
 albedo_color = Color(0.08, 0.72, 0.9, 1)
 emission_enabled = true
 emission = Color(0.02, 0.25, 0.35, 1)
-emission_energy_multiplier = 0.6
+emission_energy_multiplier = 1.8
+[sub_resource type="StandardMaterial3D" id="PanelMaterial"]
+albedo_color = Color(0.12, 0.15, 0.17, 1)
+metallic = 0.5
+roughness = 0.3
+[sub_resource type="BoxMesh" id="DetailMesh"]
 [sub_resource type="CylinderMesh" id="BodyMesh"]
 material = SubResource("BodyMaterial")
 top_radius = 0.85
@@ -46,6 +53,17 @@ mesh = SubResource("BodyMesh")
 [node name="SensorTower" type="MeshInstance3D" parent="."]
 position = Vector3(0, 0.9, 0)
 mesh = SubResource("SensorMesh")
+[node name="TopPanel" type="MeshInstance3D" parent="."]
+position = Vector3(0, 0.77, 0.12)
+mesh = SubResource("DetailMesh")
+scale = Vector3(0.72, 0.045, 0.42)
+material_override = SubResource("PanelMaterial")
+[node name="FrontStatusLight" type="MeshInstance3D" parent="."]
+position = Vector3(0, 0.53, -0.825)
+mesh = SubResource("DetailMesh")
+scale = Vector3(0.34, 0.11, 0.035)
+material_override = SubResource("SensorMaterial")
+cast_shadow = 0
 [node name="LeftWheel" type="MeshInstance3D" parent="."]
 position = Vector3(-0.82, 0.25, 0)
 rotation_degrees = Vector3(0, 0, 90)
