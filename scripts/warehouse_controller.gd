@@ -17,6 +17,7 @@ enum JobPriority {
 const JOB_TARGET_MAX_HORIZONTAL_SNAP := 0.75
 const MAX_PENDING_JOBS := 5
 const INITIAL_STOCK_PER_SHELF := 3
+const MAX_RECENT_JOB_HISTORY := 5
 
 @onready var navigation_region: NavigationRegion3D = $NavigationRegion3D
 @onready var robot: RobotController = $Robot01
@@ -51,6 +52,8 @@ const INITIAL_STOCK_PER_SHELF := 3
 @onready var job_status_label: Label = $JobUI/Panel/Margin/Readout
 @onready var inventory_panel: PanelContainer = $InventoryUI/Panel
 @onready var inventory_status_label: Label = $InventoryUI/Panel/Margin/Readout
+@onready var operations_panel: PanelContainer = $OperationsUI/Panel
+@onready var operations_status_label: Label = $OperationsUI/Panel/Margin/Readout
 
 var _navigation_ready := false
 var _job_state := JobState.IDLE
@@ -65,6 +68,12 @@ var _queued_start_scheduled := false
 var _delivery_flash_id := 0
 var _available_stock: Dictionary = {}
 var _current_stock_reserved := false
+var _jobs_accepted := 0
+var _jobs_completed := 0
+var _jobs_failed := 0
+var _current_job_started_msec := 0
+var _completed_execution_seconds := 0.0
+var _recent_job_history: Array[Dictionary] = []
 
 
 func _ready() -> void:
@@ -76,6 +85,7 @@ func _ready() -> void:
 	}
 	_update_visible_stock()
 	_update_inventory_ui()
+	_update_operations_ui()
 	robot.movement_changed.connect(_on_robot_movement_changed)
 	robot.destination_reached.connect(_on_robot_destination_reached)
 	robot.navigation_target_failed.connect(_on_robot_navigation_target_failed)
@@ -219,7 +229,8 @@ func _input(event: InputEvent) -> void:
 	print("Click received: (%.1f, %.1f)" % [mouse_event.position.x, mouse_event.position.y])
 	if movement_panel.get_global_rect().has_point(mouse_event.position) \
 			or job_panel.get_global_rect().has_point(mouse_event.position) \
-			or inventory_panel.get_global_rect().has_point(mouse_event.position):
+			or inventory_panel.get_global_rect().has_point(mouse_event.position) \
+			or operations_panel.get_global_rect().has_point(mouse_event.position):
 		print("Destination rejected: click is over the UI")
 		get_viewport().set_input_as_handled()
 		return
@@ -291,6 +302,8 @@ func _request_job(
 		"priority": priority,
 	}
 	_next_job_id += 1
+	_jobs_accepted += 1
+	_update_operations_ui()
 	if not _is_job_active() and _job_queue.is_empty():
 		_begin_job(job)
 		return
@@ -327,11 +340,13 @@ func _begin_job(job: Dictionary) -> void:
 	if _current_source_package != null:
 		_current_source_package.visible = true
 	_job_state = JobState.TRAVELLING_TO_PICKUP
+	_current_job_started_msec = Time.get_ticks_msec()
 	print("%s started [%s]" % [
 		_current_job_label(), _priority_name(_current_job_priority)
 	])
 	print("Pickup: %s" % _current_pickup_name)
 	_update_job_ui("Travelling to %s" % _current_pickup_name)
+	_update_operations_ui()
 	_command_job_target(_current_pickup_marker, _current_pickup_name)
 
 
@@ -439,6 +454,11 @@ func _begin_delivery() -> void:
 
 
 func _complete_job() -> void:
+	var elapsed_seconds := _current_job_elapsed_seconds()
+	_jobs_completed += 1
+	_completed_execution_seconds += elapsed_seconds
+	_record_job_result("COMPLETE", elapsed_seconds)
+	_current_job_started_msec = 0
 	carried_package.visible = false
 	if _current_source_package != null:
 		_current_source_package.visible = true
@@ -452,11 +472,16 @@ func _complete_job() -> void:
 	_show_delivered_package_briefly()
 	_job_state = JobState.COMPLETE
 	_update_job_ui("Complete")
+	_update_operations_ui()
 	print("%s complete" % _current_job_label())
 	_schedule_next_queued_job()
 
 
 func _fail_job(reason: String) -> void:
+	var elapsed_seconds := _current_job_elapsed_seconds()
+	_jobs_failed += 1
+	_record_job_result("FAILED", elapsed_seconds)
+	_current_job_started_msec = 0
 	carried_package.visible = false
 	if _current_source_package != null:
 		_current_source_package.visible = true
@@ -467,6 +492,7 @@ func _fail_job(reason: String) -> void:
 		_current_stock_reserved = false
 	_job_state = JobState.FAILED
 	_update_job_ui("Failed")
+	_update_operations_ui()
 	print("%s failed: %s" % [_current_job_label(), reason])
 	_schedule_next_queued_job()
 
@@ -555,6 +581,64 @@ func _update_inventory_ui() -> void:
 		_get_available_stock(shelf_03_pickup),
 		_get_available_stock(shelf_04_pickup),
 	]
+
+
+func _current_job_elapsed_seconds() -> float:
+	return (Time.get_ticks_msec() - _current_job_started_msec) / 1000.0
+
+
+func _record_job_result(status: String, elapsed_seconds: float) -> void:
+	_recent_job_history.push_front({
+		"id": _current_job_id,
+		"pickup_name": _current_pickup_name,
+		"priority": _current_job_priority,
+		"status": status,
+		"duration": elapsed_seconds,
+	})
+	if _recent_job_history.size() > MAX_RECENT_JOB_HISTORY:
+		_recent_job_history.pop_back()
+	print("Job #%03d [%s] %s %s %.1fs" % [
+		_current_job_id,
+		_priority_name(_current_job_priority),
+		_current_pickup_name,
+		status,
+		elapsed_seconds,
+	])
+
+
+func _update_operations_ui() -> void:
+	var active_text := "None"
+	if _is_job_active():
+		active_text = "#%03d [%s] %s" % [
+			_current_job_id,
+			_priority_name(_current_job_priority),
+			_current_pickup_name,
+		]
+	var average_text := "--"
+	if _jobs_completed > 0:
+		average_text = "%.1fs" % (_completed_execution_seconds / _jobs_completed)
+	var lines: Array[String] = [
+		"Operations",
+		"Accepted: %d" % _jobs_accepted,
+		"Completed: %d" % _jobs_completed,
+		"Failed: %d" % _jobs_failed,
+		"Active: %s" % active_text,
+		"Avg complete: %s" % average_text,
+		"",
+		"Recent",
+	]
+	if _recent_job_history.is_empty():
+		lines.append("No job history yet")
+	else:
+		for result in _recent_job_history:
+			lines.append("#%03d [%s] %s %s %.1fs" % [
+				result.id,
+				_priority_name(result.priority),
+				result.pickup_name,
+				result.status,
+				result.duration,
+			])
+	operations_status_label.text = "\n".join(lines)
 
 
 func _get_source_package_for_pickup(marker: Marker3D) -> MeshInstance3D:
