@@ -21,12 +21,6 @@ advanced avoidance are reserved for later phases.
 
 - **Left click** a valid warehouse floor location to set `Robot01`'s destination.
 - Click another valid floor location at any time to update the destination.
-- Press **1–4** to request a pickup job from Shelf Rows 01–04.
-- Press **5–8** to add one available unit to Shelf Rows 01–04. Restocking is
-  unavailable while the selected shelf has reserved jobs or is already full.
-
-Each shelf's floating indicator and the inventory panel show available,
-unreserved stock. Accepted jobs reserve stock immediately.
 
 Clicks on shelves, stations, walls, or outside the navigable floor are ignored.
 

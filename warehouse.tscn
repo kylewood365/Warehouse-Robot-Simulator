@@ -143,40 +143,6 @@ position = Vector3(3, 0, -1)
 [node name="ShelfRow04" parent="Shelving" instance=ExtResource("1_shelf")]
 position = Vector3(9, 0, -1)
 
-[node name="StockIndicators" type="Node3D" parent="."]
-[node name="Shelf01Stock" type="Label3D" parent="StockIndicators"]
-position = Vector3(-9, 3.9, 2.9)
-text = "AVAILABLE: 3/3"
-font_size = 64
-outline_size = 12
-modulate = Color(0.35, 1, 0.55, 1)
-billboard = 1
-no_depth_test = true
-[node name="Shelf02Stock" type="Label3D" parent="StockIndicators"]
-position = Vector3(-3, 3.9, 2.9)
-text = "AVAILABLE: 3/3"
-font_size = 64
-outline_size = 12
-modulate = Color(0.35, 1, 0.55, 1)
-billboard = 1
-no_depth_test = true
-[node name="Shelf03Stock" type="Label3D" parent="StockIndicators"]
-position = Vector3(3, 3.9, 2.9)
-text = "AVAILABLE: 3/3"
-font_size = 64
-outline_size = 12
-modulate = Color(0.35, 1, 0.55, 1)
-billboard = 1
-no_depth_test = true
-[node name="Shelf04Stock" type="Label3D" parent="StockIndicators"]
-position = Vector3(9, 3.9, 2.9)
-text = "AVAILABLE: 3/3"
-font_size = 64
-outline_size = 12
-modulate = Color(0.35, 1, 0.55, 1)
-billboard = 1
-no_depth_test = true
-
 [node name="Stations" type="Node3D" parent="." groups=["navigation_source"]]
 [node name="PackingStation" parent="Stations" instance=ExtResource("3_pack")]
 position = Vector3(-10.5, 0, 8.7)

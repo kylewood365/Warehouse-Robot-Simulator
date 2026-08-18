@@ -26,10 +26,18 @@ const INITIAL_STOCK_PER_SHELF := 3
 @onready var shelf_02_source_package: MeshInstance3D = $Shelving/ShelfRow02/PackageD
 @onready var shelf_03_source_package: MeshInstance3D = $Shelving/ShelfRow03/PackageD
 @onready var shelf_04_source_package: MeshInstance3D = $Shelving/ShelfRow04/PackageD
-@onready var shelf_01_stock_label: Label3D = $StockIndicators/Shelf01Stock
-@onready var shelf_02_stock_label: Label3D = $StockIndicators/Shelf02Stock
-@onready var shelf_03_stock_label: Label3D = $StockIndicators/Shelf03Stock
-@onready var shelf_04_stock_label: Label3D = $StockIndicators/Shelf04Stock
+@onready var shelf_01_stock_a: MeshInstance3D = $Shelving/ShelfRow01/PackageA
+@onready var shelf_01_stock_b: MeshInstance3D = $Shelving/ShelfRow01/PackageB
+@onready var shelf_01_stock_c: MeshInstance3D = $Shelving/ShelfRow01/PackageC
+@onready var shelf_02_stock_a: MeshInstance3D = $Shelving/ShelfRow02/PackageA
+@onready var shelf_02_stock_b: MeshInstance3D = $Shelving/ShelfRow02/PackageB
+@onready var shelf_02_stock_c: MeshInstance3D = $Shelving/ShelfRow02/PackageC
+@onready var shelf_03_stock_a: MeshInstance3D = $Shelving/ShelfRow03/PackageA
+@onready var shelf_03_stock_b: MeshInstance3D = $Shelving/ShelfRow03/PackageB
+@onready var shelf_03_stock_c: MeshInstance3D = $Shelving/ShelfRow03/PackageC
+@onready var shelf_04_stock_a: MeshInstance3D = $Shelving/ShelfRow04/PackageA
+@onready var shelf_04_stock_b: MeshInstance3D = $Shelving/ShelfRow04/PackageB
+@onready var shelf_04_stock_c: MeshInstance3D = $Shelving/ShelfRow04/PackageC
 @onready var carried_package: MeshInstance3D = $Robot01/CargoMount/CarriedPackage
 @onready var delivered_package: MeshInstance3D = $JobVisuals/DeliveredPackage
 @onready var movement_panel: PanelContainer = $MovementUI/Panel
@@ -480,17 +488,18 @@ func _refresh_stock_displays() -> void:
 
 
 func _update_visible_stock() -> void:
-	var stock_labels: Dictionary = {
-		shelf_01_pickup: shelf_01_stock_label,
-		shelf_02_pickup: shelf_02_stock_label,
-		shelf_03_pickup: shelf_03_stock_label,
-		shelf_04_pickup: shelf_04_stock_label,
+	var stock_packages: Dictionary = {
+		shelf_01_pickup: [shelf_01_stock_a, shelf_01_stock_b, shelf_01_stock_c],
+		shelf_02_pickup: [shelf_02_stock_a, shelf_02_stock_b, shelf_02_stock_c],
+		shelf_03_pickup: [shelf_03_stock_a, shelf_03_stock_b, shelf_03_stock_c],
+		shelf_04_pickup: [shelf_04_stock_a, shelf_04_stock_b, shelf_04_stock_c],
 	}
-	for pickup_marker in stock_labels:
-		var stock_label: Label3D = stock_labels[pickup_marker]
-		stock_label.text = "AVAILABLE: %d/%d" % [
-			_get_available_stock(pickup_marker), INITIAL_STOCK_PER_SHELF
-		]
+	for pickup_marker in stock_packages:
+		var available := _get_available_stock(pickup_marker)
+		var packages: Array = stock_packages[pickup_marker]
+		for package_index in packages.size():
+			var stock_package: MeshInstance3D = packages[package_index]
+			stock_package.visible = package_index < available
 
 
 func _update_inventory_ui() -> void:
