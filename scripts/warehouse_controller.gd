@@ -146,7 +146,7 @@ func _input(event: InputEvent) -> void:
 		print("Destination rejected: click is over the UI")
 		get_viewport().set_input_as_handled()
 		return
-	if _is_job_active():
+	if _has_autonomous_workload():
 		print("Manual destination rejected: autonomous job active")
 		get_viewport().set_input_as_handled()
 		return
@@ -344,6 +344,12 @@ func _is_job_active() -> bool:
 		JobState.PICKING,
 		JobState.TRAVELLING_TO_PACKING,
 	]
+
+
+func _has_autonomous_workload() -> bool:
+	return _is_job_active() \
+			or not _job_queue.is_empty() \
+			or _queued_start_scheduled
 
 
 func _update_job_ui(status: String) -> void:
