@@ -2,6 +2,8 @@ class_name RobotController
 extends CharacterBody3D
 
 signal movement_changed(status: String, speed: float, destination: Vector3)
+signal destination_reached(destination: Vector3)
+signal navigation_target_failed(destination: Vector3, horizontal_remaining: float)
 
 @export var move_speed := 3.5
 @export var acceleration := 8.0
@@ -65,12 +67,14 @@ func _physics_process(delta: float) -> void:
 		_print_arrival_diagnostics(horizontal_remaining)
 		_has_target = false
 		_stop_robot(delta)
+		destination_reached.emit(_destination)
 		return
 
 	if navigation_agent.is_navigation_finished():
 		_print_finished_early_diagnostics(horizontal_remaining)
 		_has_target = false
 		_stop_robot(delta)
+		navigation_target_failed.emit(_destination, horizontal_remaining)
 		return
 
 	var direction := next_position - global_position
