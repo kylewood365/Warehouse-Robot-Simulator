@@ -26,6 +26,18 @@ const INITIAL_STOCK_PER_SHELF := 3
 @onready var shelf_02_source_package: MeshInstance3D = $Shelving/ShelfRow02/PackageD
 @onready var shelf_03_source_package: MeshInstance3D = $Shelving/ShelfRow03/PackageD
 @onready var shelf_04_source_package: MeshInstance3D = $Shelving/ShelfRow04/PackageD
+@onready var shelf_01_stock_a: MeshInstance3D = $Shelving/ShelfRow01/PackageA
+@onready var shelf_01_stock_b: MeshInstance3D = $Shelving/ShelfRow01/PackageB
+@onready var shelf_01_stock_c: MeshInstance3D = $Shelving/ShelfRow01/PackageC
+@onready var shelf_02_stock_a: MeshInstance3D = $Shelving/ShelfRow02/PackageA
+@onready var shelf_02_stock_b: MeshInstance3D = $Shelving/ShelfRow02/PackageB
+@onready var shelf_02_stock_c: MeshInstance3D = $Shelving/ShelfRow02/PackageC
+@onready var shelf_03_stock_a: MeshInstance3D = $Shelving/ShelfRow03/PackageA
+@onready var shelf_03_stock_b: MeshInstance3D = $Shelving/ShelfRow03/PackageB
+@onready var shelf_03_stock_c: MeshInstance3D = $Shelving/ShelfRow03/PackageC
+@onready var shelf_04_stock_a: MeshInstance3D = $Shelving/ShelfRow04/PackageA
+@onready var shelf_04_stock_b: MeshInstance3D = $Shelving/ShelfRow04/PackageB
+@onready var shelf_04_stock_c: MeshInstance3D = $Shelving/ShelfRow04/PackageC
 @onready var carried_package: MeshInstance3D = $Robot01/CargoMount/CarriedPackage
 @onready var delivered_package: MeshInstance3D = $JobVisuals/DeliveredPackage
 @onready var movement_panel: PanelContainer = $MovementUI/Panel
@@ -56,6 +68,7 @@ func _ready() -> void:
 		shelf_03_pickup: INITIAL_STOCK_PER_SHELF,
 		shelf_04_pickup: INITIAL_STOCK_PER_SHELF,
 	}
+	_update_visible_stock()
 	_update_inventory_ui()
 	robot.movement_changed.connect(_on_robot_movement_changed)
 	robot.destination_reached.connect(_on_robot_destination_reached)
@@ -137,6 +150,7 @@ func _input(event: InputEvent) -> void:
 		if key_event.pressed and not key_event.echo:
 			var selected_pickup: Marker3D
 			var selected_name := ""
+			var is_restock := false
 			match key_event.keycode:
 				KEY_1:
 					selected_pickup = shelf_01_pickup
@@ -150,8 +164,27 @@ func _input(event: InputEvent) -> void:
 				KEY_4:
 					selected_pickup = shelf_04_pickup
 					selected_name = "Shelf Row 04"
+				KEY_5:
+					selected_pickup = shelf_01_pickup
+					selected_name = "Shelf Row 01"
+					is_restock = true
+				KEY_6:
+					selected_pickup = shelf_02_pickup
+					selected_name = "Shelf Row 02"
+					is_restock = true
+				KEY_7:
+					selected_pickup = shelf_03_pickup
+					selected_name = "Shelf Row 03"
+					is_restock = true
+				KEY_8:
+					selected_pickup = shelf_04_pickup
+					selected_name = "Shelf Row 04"
+					is_restock = true
 			if selected_pickup != null:
-				_request_job(selected_pickup, selected_name)
+				if is_restock:
+					_request_restock(selected_pickup, selected_name)
+				else:
+					_request_job(selected_pickup, selected_name)
 				get_viewport().set_input_as_handled()
 		return
 
@@ -400,6 +433,32 @@ func _has_available_stock(pickup_marker: Marker3D) -> bool:
 	return _get_available_stock(pickup_marker) > 0
 
 
+func _request_restock(pickup_marker: Marker3D, pickup_name: String) -> void:
+	if not _available_stock.has(pickup_marker):
+		print("Restock rejected: unknown shelf")
+		return
+	if _has_reserved_jobs_for_shelf(pickup_marker):
+		print("Restock unavailable: %s has reserved jobs" % pickup_name)
+		return
+	var available := _get_available_stock(pickup_marker)
+	if available >= INITIAL_STOCK_PER_SHELF:
+		print("Restock rejected: %s already full" % pickup_name)
+		return
+	available += 1
+	_available_stock[pickup_marker] = available
+	_refresh_stock_displays()
+	print("Restocked: %s — %d" % [pickup_name, available])
+
+
+func _has_reserved_jobs_for_shelf(pickup_marker: Marker3D) -> bool:
+	if _current_stock_reserved and _current_pickup_marker == pickup_marker:
+		return true
+	for job in _job_queue:
+		if job.pickup_marker == pickup_marker:
+			return true
+	return false
+
+
 func _reserve_stock(pickup_marker: Marker3D, pickup_name: String) -> bool:
 	var available := _get_available_stock(pickup_marker)
 	if available <= 0:
@@ -408,7 +467,7 @@ func _reserve_stock(pickup_marker: Marker3D, pickup_name: String) -> bool:
 	print("Inventory reserved: %s — %d/%d available" % [
 		pickup_name, available - 1, INITIAL_STOCK_PER_SHELF
 	])
-	_update_inventory_ui()
+	_refresh_stock_displays()
 	return true
 
 
@@ -420,11 +479,31 @@ func _release_stock(pickup_marker: Marker3D, pickup_name: String) -> void:
 	print("Inventory reservation released: %s — %d/%d available" % [
 		pickup_name, available, INITIAL_STOCK_PER_SHELF
 	])
+	_refresh_stock_displays()
+
+
+func _refresh_stock_displays() -> void:
+	_update_visible_stock()
 	_update_inventory_ui()
 
 
+func _update_visible_stock() -> void:
+	var stock_packages: Dictionary = {
+		shelf_01_pickup: [shelf_01_stock_a, shelf_01_stock_b, shelf_01_stock_c],
+		shelf_02_pickup: [shelf_02_stock_a, shelf_02_stock_b, shelf_02_stock_c],
+		shelf_03_pickup: [shelf_03_stock_a, shelf_03_stock_b, shelf_03_stock_c],
+		shelf_04_pickup: [shelf_04_stock_a, shelf_04_stock_b, shelf_04_stock_c],
+	}
+	for pickup_marker in stock_packages:
+		var available := _get_available_stock(pickup_marker)
+		var packages: Array = stock_packages[pickup_marker]
+		for package_index in packages.size():
+			var stock_package: MeshInstance3D = packages[package_index]
+			stock_package.visible = package_index < available
+
+
 func _update_inventory_ui() -> void:
-	inventory_status_label.text = "Available Stock\nShelf 01: %d\nShelf 02: %d\nShelf 03: %d\nShelf 04: %d" % [
+	inventory_status_label.text = "Available Stock / Restock\nShelf 01: %d   [5] +1\nShelf 02: %d   [6] +1\nShelf 03: %d   [7] +1\nShelf 04: %d   [8] +1" % [
 		_get_available_stock(shelf_01_pickup),
 		_get_available_stock(shelf_02_pickup),
 		_get_available_stock(shelf_03_pickup),

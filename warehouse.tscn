@@ -375,7 +375,7 @@ anchor_right = 1.0
 offset_left = -190.0
 offset_top = 16.0
 offset_right = -16.0
-offset_bottom = 154.0
+offset_bottom = 174.0
 grow_horizontal = 0
 mouse_filter = 1
 theme_override_styles/panel = SubResource("PanelStyle")
@@ -385,6 +385,6 @@ theme_override_constants/margin_top = 10
 theme_override_constants/margin_right = 14
 theme_override_constants/margin_bottom = 10
 [node name="Readout" type="Label" parent="InventoryUI/Panel/Margin"]
-text = "Available Stock\nShelf 01: 3\nShelf 02: 3\nShelf 03: 3\nShelf 04: 3"
+text = "Available Stock / Restock\nShelf 01: 3   [5] +1\nShelf 02: 3   [6] +1\nShelf 03: 3   [7] +1\nShelf 04: 3   [8] +1"
 theme_override_colors/font_color = Color(0.9, 0.96, 1, 1)
 theme_override_font_sizes/font_size = 16
