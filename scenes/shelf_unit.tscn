@@ -1,0 +1,82 @@
+[gd_scene load_steps=9 format=3]
+
+[sub_resource type="StandardMaterial3D" id="SteelMaterial"]
+albedo_color = Color(0.12, 0.24, 0.33, 1)
+metallic = 0.35
+roughness = 0.55
+
+[sub_resource type="StandardMaterial3D" id="ShelfMaterial"]
+albedo_color = Color(0.78, 0.48, 0.09, 1)
+roughness = 0.7
+
+[sub_resource type="StandardMaterial3D" id="BoxMaterial"]
+albedo_color = Color(0.62, 0.38, 0.16, 1)
+roughness = 0.9
+
+[sub_resource type="StandardMaterial3D" id="BoxAccentMaterial"]
+albedo_color = Color(0.82, 0.69, 0.4, 1)
+roughness = 0.9
+
+[sub_resource type="BoxMesh" id="SupportMesh"]
+material = SubResource("SteelMaterial")
+size = Vector3(0.16, 3.6, 0.16)
+
+[sub_resource type="BoxMesh" id="ShelfMesh"]
+material = SubResource("ShelfMaterial")
+size = Vector3(2.4, 0.14, 7.6)
+
+[sub_resource type="BoxShape3D" id="RackCollision"]
+size = Vector3(2.4, 3.6, 7.6)
+
+[sub_resource type="BoxMesh" id="PackageMesh"]
+
+[node name="ShelfUnit" type="Node3D"]
+
+[node name="RackCollision" type="StaticBody3D" parent="."]
+[node name="CollisionShape3D" type="CollisionShape3D" parent="RackCollision"]
+position = Vector3(0, 1.8, 0)
+shape = SubResource("RackCollision")
+
+[node name="LeftFrontSupport" type="MeshInstance3D" parent="."]
+position = Vector3(-1.1, 1.8, -3.7)
+mesh = SubResource("SupportMesh")
+[node name="LeftBackSupport" type="MeshInstance3D" parent="."]
+position = Vector3(-1.1, 1.8, 3.7)
+mesh = SubResource("SupportMesh")
+[node name="RightFrontSupport" type="MeshInstance3D" parent="."]
+position = Vector3(1.1, 1.8, -3.7)
+mesh = SubResource("SupportMesh")
+[node name="RightBackSupport" type="MeshInstance3D" parent="."]
+position = Vector3(1.1, 1.8, 3.7)
+mesh = SubResource("SupportMesh")
+
+[node name="BottomShelf" type="MeshInstance3D" parent="."]
+position = Vector3(0, 0.45, 0)
+mesh = SubResource("ShelfMesh")
+[node name="MiddleShelf" type="MeshInstance3D" parent="."]
+position = Vector3(0, 1.65, 0)
+mesh = SubResource("ShelfMesh")
+[node name="TopShelf" type="MeshInstance3D" parent="."]
+position = Vector3(0, 2.85, 0)
+mesh = SubResource("ShelfMesh")
+
+[node name="PackageA" type="MeshInstance3D" parent="."]
+position = Vector3(-0.55, 0.93, -2.7)
+mesh = SubResource("PackageMesh")
+scale = Vector3(0.75, 0.75, 0.85)
+material_override = SubResource("BoxMaterial")
+[node name="PackageB" type="MeshInstance3D" parent="."]
+position = Vector3(0.5, 0.85, -1.2)
+mesh = SubResource("PackageMesh")
+scale = Vector3(0.85, 0.6, 1.1)
+material_override = SubResource("BoxAccentMaterial")
+[node name="PackageC" type="MeshInstance3D" parent="."]
+position = Vector3(-0.45, 2.08, 1.15)
+mesh = SubResource("PackageMesh")
+scale = Vector3(0.9, 0.7, 1.25)
+material_override = SubResource("BoxMaterial")
+[node name="PackageD" type="MeshInstance3D" parent="."]
+position = Vector3(0.5, 2.1, 2.65)
+mesh = SubResource("PackageMesh")
+scale = Vector3(0.75, 0.75, 0.8)
+material_override = SubResource("BoxAccentMaterial")

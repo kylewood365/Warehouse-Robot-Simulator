@@ -1,3 +1,116 @@
-[gd_scene format=3 uid="uid://cby2cbm7o72yy"]
+[gd_scene load_steps=14 format=3 uid="uid://cby2cbm7o72yy"]
 
-[node name="Warehouse" type="Node3D" unique_id=91691614]
+[ext_resource type="PackedScene" path="res://scenes/shelf_unit.tscn" id="1_shelf"]
+[ext_resource type="PackedScene" path="res://scenes/robot.tscn" id="2_robot"]
+[ext_resource type="PackedScene" path="res://scenes/packing_station.tscn" id="3_pack"]
+[ext_resource type="PackedScene" path="res://scenes/charging_station.tscn" id="4_charge"]
+
+[sub_resource type="StandardMaterial3D" id="FloorMaterial"]
+albedo_color = Color(0.42, 0.44, 0.45, 1)
+roughness = 0.95
+[sub_resource type="StandardMaterial3D" id="WallMaterial"]
+albedo_color = Color(0.73, 0.77, 0.78, 1)
+roughness = 0.85
+[sub_resource type="StandardMaterial3D" id="StripeMaterial"]
+albedo_color = Color(0.94, 0.7, 0.08, 1)
+roughness = 0.75
+[sub_resource type="BoxMesh" id="FloorMesh"]
+material = SubResource("FloorMaterial")
+size = Vector3(30, 0.3, 24)
+[sub_resource type="BoxShape3D" id="FloorShape"]
+size = Vector3(30, 0.3, 24)
+[sub_resource type="BoxMesh" id="LongWallMesh"]
+material = SubResource("WallMaterial")
+size = Vector3(30, 2.8, 0.35)
+[sub_resource type="BoxShape3D" id="LongWallShape"]
+size = Vector3(30, 2.8, 0.35)
+[sub_resource type="BoxMesh" id="SideWallMesh"]
+material = SubResource("WallMaterial")
+size = Vector3(0.35, 2.8, 24)
+[sub_resource type="BoxShape3D" id="SideWallShape"]
+size = Vector3(0.35, 2.8, 24)
+[sub_resource type="BoxMesh" id="UnitBoxMesh"]
+
+[node name="Warehouse" type="Node3D"]
+
+[node name="Architecture" type="Node3D" parent="."]
+[node name="Floor" type="StaticBody3D" parent="Architecture"]
+[node name="FloorMesh" type="MeshInstance3D" parent="Architecture/Floor"]
+position = Vector3(0, -0.15, 0)
+mesh = SubResource("FloorMesh")
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Architecture/Floor"]
+position = Vector3(0, -0.15, 0)
+shape = SubResource("FloorShape")
+
+[node name="NorthWall" type="StaticBody3D" parent="Architecture"]
+position = Vector3(0, 1.4, -12)
+[node name="Mesh" type="MeshInstance3D" parent="Architecture/NorthWall"]
+mesh = SubResource("LongWallMesh")
+[node name="Collision" type="CollisionShape3D" parent="Architecture/NorthWall"]
+shape = SubResource("LongWallShape")
+[node name="SouthWall" type="StaticBody3D" parent="Architecture"]
+position = Vector3(0, 1.4, 12)
+[node name="Mesh" type="MeshInstance3D" parent="Architecture/SouthWall"]
+mesh = SubResource("LongWallMesh")
+[node name="Collision" type="CollisionShape3D" parent="Architecture/SouthWall"]
+shape = SubResource("LongWallShape")
+[node name="WestWall" type="StaticBody3D" parent="Architecture"]
+position = Vector3(-15, 1.4, 0)
+[node name="Mesh" type="MeshInstance3D" parent="Architecture/WestWall"]
+mesh = SubResource("SideWallMesh")
+[node name="Collision" type="CollisionShape3D" parent="Architecture/WestWall"]
+shape = SubResource("SideWallShape")
+[node name="EastWall" type="StaticBody3D" parent="Architecture"]
+position = Vector3(15, 1.4, 0)
+[node name="Mesh" type="MeshInstance3D" parent="Architecture/EastWall"]
+mesh = SubResource("SideWallMesh")
+[node name="Collision" type="CollisionShape3D" parent="Architecture/EastWall"]
+shape = SubResource("SideWallShape")
+
+[node name="Shelving" type="Node3D" parent="."]
+[node name="ShelfRow01" parent="Shelving" instance=ExtResource("1_shelf")]
+position = Vector3(-9, 0, -1)
+[node name="ShelfRow02" parent="Shelving" instance=ExtResource("1_shelf")]
+position = Vector3(-3, 0, -1)
+[node name="ShelfRow03" parent="Shelving" instance=ExtResource("1_shelf")]
+position = Vector3(3, 0, -1)
+[node name="ShelfRow04" parent="Shelving" instance=ExtResource("1_shelf")]
+position = Vector3(9, 0, -1)
+
+[node name="Stations" type="Node3D" parent="."]
+[node name="PackingStation" parent="Stations" instance=ExtResource("3_pack")]
+position = Vector3(-10.5, 0, 8.7)
+[node name="ChargingStation" parent="Stations" instance=ExtResource("4_charge")]
+position = Vector3(11, 0, -10.8)
+rotation_degrees = Vector3(0, 180, 0)
+[node name="Robot01" parent="." instance=ExtResource("2_robot")]
+position = Vector3(0, 0, 7.8)
+
+[node name="AisleMarkings" type="Node3D" parent="."]
+[node name="PackingZone" type="MeshInstance3D" parent="AisleMarkings"]
+position = Vector3(-10.5, 0.012, 7.2)
+mesh = SubResource("UnitBoxMesh")
+scale = Vector3(4.4, 0.025, 0.12)
+material_override = SubResource("StripeMaterial")
+[node name="ChargingZone" type="MeshInstance3D" parent="AisleMarkings"]
+position = Vector3(11, 0.012, -8.6)
+mesh = SubResource("UnitBoxMesh")
+scale = Vector3(3.2, 0.025, 0.12)
+material_override = SubResource("StripeMaterial")
+
+[node name="Lighting" type="Node3D" parent="."]
+[node name="SunLight" type="DirectionalLight3D" parent="Lighting"]
+rotation_degrees = Vector3(-58, -28, 0)
+light_color = Color(1, 0.95, 0.84, 1)
+light_energy = 1.15
+shadow_enabled = true
+[node name="FillLight" type="DirectionalLight3D" parent="Lighting"]
+rotation_degrees = Vector3(-70, 145, 0)
+light_color = Color(0.65, 0.78, 1, 1)
+light_energy = 0.45
+
+[node name="OverviewCamera" type="Camera3D" parent="."]
+position = Vector3(0, 24, 27)
+rotation_degrees = Vector3(-40, 0, 0)
+current = true
+fov = 60.0
