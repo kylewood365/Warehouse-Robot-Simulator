@@ -9,6 +9,8 @@
 [sub_resource type="NavigationMesh" id="WarehouseNavigationMesh"]
 sample_partition_type = 2
 parsed_geometry_type = 1
+source_geometry_mode = 1
+source_geometry_group_name = &"navigation_source"
 agent_radius = 1.0
 agent_height = 1.2
 agent_max_climb = 0.25
@@ -64,7 +66,7 @@ script = ExtResource("5_controller")
 [node name="NavigationRegion3D" type="NavigationRegion3D" parent="."]
 navigation_mesh = SubResource("WarehouseNavigationMesh")
 
-[node name="Architecture" type="Node3D" parent="."]
+[node name="Architecture" type="Node3D" parent="." groups=["navigation_source"]]
 [node name="Floor" type="StaticBody3D" parent="Architecture"]
 [node name="FloorMesh" type="MeshInstance3D" parent="Architecture/Floor"]
 position = Vector3(0, -0.15, 0)
@@ -98,7 +100,7 @@ mesh = SubResource("SideWallMesh")
 [node name="Collision" type="CollisionShape3D" parent="Architecture/EastWall"]
 shape = SubResource("SideWallShape")
 
-[node name="Shelving" type="Node3D" parent="."]
+[node name="Shelving" type="Node3D" parent="." groups=["navigation_source"]]
 [node name="ShelfRow01" parent="Shelving" instance=ExtResource("1_shelf")]
 position = Vector3(-9, 0, -1)
 [node name="ShelfRow02" parent="Shelving" instance=ExtResource("1_shelf")]
@@ -108,7 +110,7 @@ position = Vector3(3, 0, -1)
 [node name="ShelfRow04" parent="Shelving" instance=ExtResource("1_shelf")]
 position = Vector3(9, 0, -1)
 
-[node name="Stations" type="Node3D" parent="."]
+[node name="Stations" type="Node3D" parent="." groups=["navigation_source"]]
 [node name="PackingStation" parent="Stations" instance=ExtResource("3_pack")]
 position = Vector3(-10.5, 0, 8.7)
 [node name="ChargingStation" parent="Stations" instance=ExtResource("4_charge")]
