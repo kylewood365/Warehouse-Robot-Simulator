@@ -107,9 +107,12 @@ func _input(event: InputEvent) -> void:
 		return
 	var navigation_map := navigation_region.get_navigation_map()
 	var valid_position := NavigationServer3D.map_get_closest_point(navigation_map, clicked_position)
-	var snap_distance := valid_position.distance_to(clicked_position)
+	var snap_distance := Vector2(
+		valid_position.x - clicked_position.x,
+		valid_position.z - clicked_position.z
+	).length()
 	print("Navigation closest point: %s" % _format_vector3(valid_position))
-	print("Navigation snap distance: %.3f" % snap_distance)
+	print("Navigation horizontal snap distance: %.3f" % snap_distance)
 	# A point far from the closest polygon lies under an obstacle or off the mesh.
 	if snap_distance > 0.4:
 		print("Destination rejected: navigation snap distance exceeds 0.4")
