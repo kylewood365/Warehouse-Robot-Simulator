@@ -67,7 +67,7 @@ script = ExtResource("5_controller")
 navigation_mesh = SubResource("WarehouseNavigationMesh")
 
 [node name="Architecture" type="Node3D" parent="." groups=["navigation_source"]]
-[node name="Floor" type="StaticBody3D" parent="Architecture"]
+[node name="Floor" type="StaticBody3D" parent="Architecture" groups=["warehouse_floor"]]
 [node name="FloorMesh" type="MeshInstance3D" parent="Architecture/Floor"]
 position = Vector3(0, -0.15, 0)
 mesh = SubResource("FloorMesh")
