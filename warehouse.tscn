@@ -163,6 +163,8 @@ position = Vector3(3, 0, 4.3)
 position = Vector3(9, 0, 4.3)
 [node name="PackingDropoff" type="Marker3D" parent="JobTargets"]
 position = Vector3(-10.5, 0, 6.2)
+[node name="ChargingTarget" type="Marker3D" parent="JobTargets"]
+position = Vector3(11, 0, -9.3)
 
 [node name="JobVisuals" type="Node3D" parent="."]
 [node name="DeliveredPackage" type="MeshInstance3D" parent="JobVisuals"]
@@ -337,7 +339,7 @@ fov = 57.0
 offset_left = 16.0
 offset_top = 16.0
 offset_right = 268.0
-offset_bottom = 126.0
+offset_bottom = 144.0
 theme_override_styles/panel = SubResource("PanelStyle")
 [node name="Margin" type="MarginContainer" parent="MovementUI/Panel"]
 theme_override_constants/margin_left = 14
@@ -345,16 +347,16 @@ theme_override_constants/margin_top = 10
 theme_override_constants/margin_right = 14
 theme_override_constants/margin_bottom = 10
 [node name="Readout" type="Label" parent="MovementUI/Panel/Margin"]
-text = "Robot01\nStatus: Preparing navigation...\nSpeed: 0.00 m/s\nDestination: —"
+text = "Robot01\nStatus: Preparing navigation...\nSpeed: 0.00 m/s\nDestination: —\nBattery: 100.0% [OK]   [C] Charge"
 theme_override_colors/font_color = Color(0.9, 0.96, 1, 1)
 theme_override_font_sizes/font_size = 16
 
 [node name="JobUI" type="CanvasLayer" parent="."]
 [node name="Panel" type="PanelContainer" parent="JobUI"]
 offset_left = 16.0
-offset_top = 142.0
+offset_top = 160.0
 offset_right = 304.0
-offset_bottom = 360.0
+offset_bottom = 378.0
 mouse_filter = 1
 theme_override_styles/panel = SubResource("PanelStyle")
 [node name="Margin" type="MarginContainer" parent="JobUI/Panel"]
