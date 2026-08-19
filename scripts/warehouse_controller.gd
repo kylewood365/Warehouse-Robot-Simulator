@@ -96,6 +96,7 @@ var _recent_job_history: Array[Dictionary] = []
 var _battery_percent: float = BATTERY_MAX_PERCENT
 var _last_battery_position: Vector3 = Vector3.ZERO
 var _charge_state: int = ChargeState.NONE
+var _automatic_charge_in_progress: bool = false
 var _robot_movement_status := "Idle"
 var _robot_speed := 0.0
 var _robot_destination := Vector3.ZERO
@@ -350,7 +351,8 @@ func _request_job(
 	_next_job_id += 1
 	_jobs_accepted += 1
 	_update_operations_ui()
-	if not _is_job_active() and _job_queue.is_empty():
+	if not _is_job_active() and _job_queue.is_empty() \
+			and not _needs_charge_before_dispatch():
 		_begin_job(job)
 		return
 
@@ -434,7 +436,8 @@ func _begin_job(job: Dictionary) -> void:
 
 
 func _schedule_next_queued_job() -> void:
-	if _job_queue.is_empty() or _queued_start_scheduled:
+	if _job_queue.is_empty() or _queued_start_scheduled \
+			or _charge_state != ChargeState.NONE:
 		return
 	_queued_start_scheduled = true
 	call_deferred("_start_next_queued_job")
@@ -442,13 +445,26 @@ func _schedule_next_queued_job() -> void:
 
 func _start_next_queued_job() -> void:
 	_queued_start_scheduled = false
-	if not _navigation_ready or _is_job_active() or _job_queue.is_empty():
+	if not _navigation_ready or _is_job_active() or _job_queue.is_empty() \
+			or _charge_state != ChargeState.NONE:
+		return
+	if _needs_charge_before_dispatch():
+		var pending_job: Dictionary = _job_queue.front()
+		print("Battery low: %.1f%% — automatically charging before Job #%03d; job remains pending" % [
+			_battery_percent, pending_job.id
+		])
+		_update_job_ui("Charging before next job")
+		_begin_charge_trip(true)
 		return
 	var job: Dictionary = _job_queue.pop_front()
 	print("Starting queued Job #%03d: %s [%s]" % [
 		job.id, job.pickup_name, _priority_name(job.priority)
 	])
 	_begin_job(job)
+
+
+func _needs_charge_before_dispatch() -> bool:
+	return _battery_percent <= BATTERY_LOW_PERCENT
 
 
 func _command_job_target(marker: Marker3D, target_name: String) -> void:
@@ -506,10 +522,13 @@ func _on_robot_navigation_target_failed(
 		destination: Vector3, horizontal_remaining: float
 ) -> void:
 	if _charge_state == ChargeState.TRAVELLING:
-		print("Charge navigation failed")
+		var was_automatic_charge: bool = _automatic_charge_in_progress
+		print("Automatic charge navigation failed; pending jobs remain paused" \
+				if was_automatic_charge else "Charge navigation failed")
 		print("Charge failure destination: %s" % _format_vector3(destination))
 		print("Charge failure horizontal remaining: %.3f" % horizontal_remaining)
 		_charge_state = ChargeState.NONE
+		_automatic_charge_in_progress = false
 		destination_marker.visible = false
 		_update_movement_ui()
 		return
@@ -959,10 +978,11 @@ func _request_charge() -> void:
 	if _battery_percent >= 99.9:
 		print("Charge not required: battery full")
 		return
-	_begin_charge_trip()
+	_begin_charge_trip(false)
 
 
-func _begin_charge_trip() -> void:
+func _begin_charge_trip(automatic: bool = false) -> void:
+	_automatic_charge_in_progress = automatic
 	var authored_position: Vector3 = charging_target.global_position
 	var navigation_map: RID = navigation_region.get_navigation_map()
 	var navigation_position: Vector3 = NavigationServer3D.map_get_closest_point(
@@ -976,8 +996,12 @@ func _begin_charge_trip() -> void:
 	print("Charge target navigation position: %s" % _format_vector3(navigation_position))
 	print("Charge target horizontal snap distance: %.3f" % horizontal_snap_distance)
 	if horizontal_snap_distance > CHARGE_TARGET_MAX_HORIZONTAL_SNAP:
-		print("Charge unavailable: target is %.3f m from the NavigationMesh" % horizontal_snap_distance)
+		if automatic:
+			print("Automatic charge unavailable: target is %.3f m from the NavigationMesh; pending jobs remain paused" % horizontal_snap_distance)
+		else:
+			print("Charge unavailable: target is %.3f m from the NavigationMesh" % horizontal_snap_distance)
 		_charge_state = ChargeState.NONE
+		_automatic_charge_in_progress = false
 		return
 	_charge_state = ChargeState.TRAVELLING
 	destination_marker.global_position = Vector3(
@@ -1001,5 +1025,10 @@ func _begin_station_charging() -> void:
 	_battery_percent = BATTERY_MAX_PERCENT
 	_last_battery_position = robot.global_position
 	_charge_state = ChargeState.NONE
+	var resume_warehouse_queue: bool = _automatic_charge_in_progress
+	_automatic_charge_in_progress = false
 	_update_movement_ui()
 	print("Robot01 charging complete: %.1f%%" % _battery_percent)
+	if resume_warehouse_queue:
+		print("Automatic charging complete — resuming warehouse queue")
+		_schedule_next_queued_job()
