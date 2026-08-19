@@ -29,6 +29,7 @@ const HIGH_SLA_SECONDS := 12.0
 const BATTERY_MAX_PERCENT := 100.0
 const BATTERY_LOW_PERCENT := 25.0
 const BATTERY_DRAIN_PER_METER := 1.0
+const BATTERY_DISPATCH_RESERVE_PERCENT := 10.0
 const CHARGE_DURATION_SECONDS := 4.0
 const CHARGE_TARGET_MAX_HORIZONTAL_SNAP := 0.75
 
@@ -352,7 +353,7 @@ func _request_job(
 	_jobs_accepted += 1
 	_update_operations_ui()
 	if not _is_job_active() and _job_queue.is_empty() \
-			and not _needs_charge_before_dispatch():
+			and not _should_charge_before_dispatch(job):
 		_begin_job(job)
 		return
 
@@ -448,11 +449,9 @@ func _start_next_queued_job() -> void:
 	if not _navigation_ready or _is_job_active() or _job_queue.is_empty() \
 			or _charge_state != ChargeState.NONE:
 		return
-	if _needs_charge_before_dispatch():
-		var pending_job: Dictionary = _job_queue.front()
-		print("Battery low: %.1f%% — automatically charging before Job #%03d; job remains pending" % [
-			_battery_percent, pending_job.id
-		])
+	var pending_job: Dictionary = _job_queue.front()
+	if _should_charge_before_dispatch(pending_job):
+		print("Automatically charging before Job #%03d; job remains pending" % pending_job.id)
 		_update_job_ui("Charging before next job")
 		_begin_charge_trip(true)
 		return
@@ -463,8 +462,92 @@ func _start_next_queued_job() -> void:
 	_begin_job(job)
 
 
-func _needs_charge_before_dispatch() -> bool:
-	return _battery_percent <= BATTERY_LOW_PERCENT
+func _estimate_navigation_path_distance(
+		from_position: Vector3, to_position: Vector3
+) -> float:
+	var navigation_map: RID = navigation_region.get_navigation_map()
+	var path: PackedVector3Array = NavigationServer3D.map_get_path(
+		navigation_map, from_position, to_position, true
+	)
+	if path.size() < 2:
+		return -1.0
+	var distance: float = 0.0
+	for point_index: int in range(1, path.size()):
+		var previous_point: Vector3 = path[point_index - 1]
+		var current_point: Vector3 = path[point_index]
+		distance += Vector2(
+			current_point.x - previous_point.x,
+			current_point.z - previous_point.z
+		).length()
+	return distance
+
+
+func _estimate_job_battery_requirement(job: Dictionary) -> Dictionary:
+	var pickup_marker: Marker3D = job.pickup_marker
+	var pickup_distance: float = _estimate_navigation_path_distance(
+		robot.global_position, pickup_marker.global_position
+	)
+	var packing_distance: float = _estimate_navigation_path_distance(
+		pickup_marker.global_position, packing_dropoff.global_position
+	)
+	if pickup_distance < 0.0 or packing_distance < 0.0:
+		return {"valid": false}
+	var estimated_distance: float = pickup_distance + packing_distance
+	var predicted_consumption: float = estimated_distance * BATTERY_DRAIN_PER_METER
+	var required_battery: float = predicted_consumption \
+			+ BATTERY_DISPATCH_RESERVE_PERCENT
+	return {
+		"valid": true,
+		"distance": estimated_distance,
+		"predicted_consumption": predicted_consumption,
+		"required_battery": required_battery,
+	}
+
+
+func _should_charge_before_dispatch(job: Dictionary) -> bool:
+	var job_id: int = job.id
+	var estimate: Dictionary = _estimate_job_battery_requirement(job)
+	if not bool(estimate.get("valid", false)):
+		print("Battery prediction unavailable for Job #%03d — using LOW threshold only" % job_id)
+		return _battery_percent <= BATTERY_LOW_PERCENT \
+				and _battery_percent < 99.9
+
+	var estimated_distance: float = estimate.distance
+	var predicted_consumption: float = estimate.predicted_consumption
+	var required_battery: float = estimate.required_battery
+	print(
+		(
+			"Battery dispatch check Job #%03d: current %.1f%%, estimated route %.1fm, "
+			+ "predicted use %.1f%%, reserve %.1f%%, required %.1f%%"
+		) % [
+			job_id,
+			_battery_percent,
+			estimated_distance,
+			predicted_consumption,
+			BATTERY_DISPATCH_RESERVE_PERCENT,
+			required_battery,
+		]
+	)
+	if _battery_percent >= 99.9:
+		if required_battery > BATTERY_MAX_PERCENT:
+			print(
+				(
+					"Job #%03d predicted requirement exceeds battery capacity — "
+					+ "dispatching at full charge"
+				) % job_id
+			)
+		return false
+	if _battery_percent <= BATTERY_LOW_PERCENT:
+		print("Battery low: %.1f%% — automatic charge required before Job #%03d" % [
+			_battery_percent, job_id
+		])
+		return true
+	if _battery_percent < required_battery:
+		print("Predictive charge required before Job #%03d: battery %.1f%%, required %.1f%%" % [
+			job_id, _battery_percent, required_battery
+		])
+		return true
+	return false
 
 
 func _command_job_target(marker: Marker3D, target_name: String) -> void:
