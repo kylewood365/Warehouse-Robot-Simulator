@@ -14,12 +14,23 @@ enum JobPriority {
 	HIGH,
 }
 
+enum ChargeState {
+	NONE,
+	TRAVELLING,
+	CHARGING,
+}
+
 const JOB_TARGET_MAX_HORIZONTAL_SNAP := 0.75
 const MAX_PENDING_JOBS := 5
 const INITIAL_STOCK_PER_SHELF := 3
 const MAX_RECENT_JOB_HISTORY := 5
 const NORMAL_SLA_SECONDS := 20.0
 const HIGH_SLA_SECONDS := 12.0
+const BATTERY_MAX_PERCENT := 100.0
+const BATTERY_LOW_PERCENT := 25.0
+const BATTERY_DRAIN_PER_METER := 1.0
+const CHARGE_DURATION_SECONDS := 4.0
+const CHARGE_TARGET_MAX_HORIZONTAL_SNAP := 0.75
 
 @onready var navigation_region: NavigationRegion3D = $NavigationRegion3D
 @onready var robot: RobotController = $Robot01
@@ -30,6 +41,7 @@ const HIGH_SLA_SECONDS := 12.0
 @onready var shelf_03_pickup: Marker3D = $JobTargets/Shelf03Pickup
 @onready var shelf_04_pickup: Marker3D = $JobTargets/Shelf04Pickup
 @onready var packing_dropoff: Marker3D = $JobTargets/PackingDropoff
+@onready var charging_target: Marker3D = $JobTargets/ChargingTarget
 @onready var shelf_01_source_package: MeshInstance3D = $Shelving/ShelfRow01/PackageD
 @onready var shelf_02_source_package: MeshInstance3D = $Shelving/ShelfRow02/PackageD
 @onready var shelf_03_source_package: MeshInstance3D = $Shelving/ShelfRow03/PackageD
@@ -81,9 +93,16 @@ var _completed_execution_seconds := 0.0
 var _sla_on_time := 0
 var _sla_late := 0
 var _recent_job_history: Array[Dictionary] = []
+var _battery_percent: float = BATTERY_MAX_PERCENT
+var _last_battery_position: Vector3 = Vector3.ZERO
+var _charge_state: int = ChargeState.NONE
+var _robot_movement_status := "Idle"
+var _robot_speed := 0.0
+var _robot_destination := Vector3.ZERO
 
 
 func _ready() -> void:
+	_last_battery_position = robot.global_position
 	_available_stock = {
 		shelf_01_pickup: INITIAL_STOCK_PER_SHELF,
 		shelf_02_pickup: INITIAL_STOCK_PER_SHELF,
@@ -97,7 +116,8 @@ func _ready() -> void:
 	robot.destination_reached.connect(_on_robot_destination_reached)
 	robot.navigation_target_failed.connect(_on_robot_navigation_target_failed)
 	destination_marker.visible = false
-	status_label.text = "Robot01\nStatus: Preparing navigation...\nSpeed: 0.00 m/s\nDestination: —"
+	_robot_movement_status = "Preparing navigation..."
+	_update_movement_ui()
 	_update_job_ui("Preparing navigation...")
 	# Parsing touches the SceneTree, so wait until every child in the warehouse scene
 	# has completed its ready step before collecting the grouped static colliders.
@@ -163,7 +183,9 @@ func _navigation_failed(stage: String, detail: String) -> void:
 		"Navigation failed during %s: %s; click-to-move is disabled"
 		% [stage, detail]
 	)
-	status_label.text = "Robot01\nStatus: Navigation unavailable\nSpeed: 0.00 m/s\nDestination: —"
+	_robot_movement_status = "Navigation unavailable"
+	_robot_speed = 0.0
+	_update_movement_ui()
 	_update_job_ui("Failed — navigation unavailable")
 
 
@@ -176,6 +198,10 @@ func _input(event: InputEvent) -> void:
 			var is_restock := false
 			var priority := JobPriority.NORMAL
 			match key_event.keycode:
+				KEY_C:
+					_request_charge()
+					get_viewport().set_input_as_handled()
+					return
 				KEY_1:
 					selected_pickup = shelf_01_pickup
 					selected_name = "Shelf Row 01"
@@ -296,6 +322,9 @@ func _request_job(
 		pickup_name: String,
 		priority: int = JobPriority.NORMAL
 ) -> void:
+	if _charge_state != ChargeState.NONE:
+		print("Job start unavailable: Robot01 is charging")
+		return
 	if not _navigation_ready:
 		print("Job start unavailable: navigation is not ready")
 		return
@@ -459,6 +488,9 @@ func _get_navigation_target_for_job(marker: Marker3D, target_name: String) -> Di
 
 
 func _on_robot_destination_reached(_destination: Vector3) -> void:
+	if _charge_state == ChargeState.TRAVELLING:
+		_begin_station_charging()
+		return
 	match _job_state:
 		JobState.TRAVELLING_TO_PICKUP:
 			print("Robot arrived for %s pickup: %s" % [
@@ -473,6 +505,14 @@ func _on_robot_destination_reached(_destination: Vector3) -> void:
 func _on_robot_navigation_target_failed(
 		destination: Vector3, horizontal_remaining: float
 ) -> void:
+	if _charge_state == ChargeState.TRAVELLING:
+		print("Charge navigation failed")
+		print("Charge failure destination: %s" % _format_vector3(destination))
+		print("Charge failure horizontal remaining: %.3f" % horizontal_remaining)
+		_charge_state = ChargeState.NONE
+		destination_marker.visible = false
+		_update_movement_ui()
+		return
 	var failed_leg := ""
 	match _job_state:
 		JobState.TRAVELLING_TO_PICKUP:
@@ -791,7 +831,8 @@ func _is_job_active() -> bool:
 func _has_autonomous_workload() -> bool:
 	return _is_job_active() \
 			or not _job_queue.is_empty() \
-			or _queued_start_scheduled
+			or _queued_start_scheduled \
+			or _charge_state != ChargeState.NONE
 
 
 func _update_job_ui(status: String) -> void:
@@ -859,9 +900,106 @@ func _format_vector3(value: Vector3) -> String:
 
 
 func _on_robot_movement_changed(status: String, speed: float, destination: Vector3) -> void:
+	var current_position: Vector3 = robot.global_position
+	var travelled_meters: float = Vector2(
+		current_position.x - _last_battery_position.x,
+		current_position.z - _last_battery_position.z
+	).length()
+	if travelled_meters > 0.0:
+		_battery_percent = clampf(
+			_battery_percent - travelled_meters * BATTERY_DRAIN_PER_METER,
+			0.0,
+			BATTERY_MAX_PERCENT
+		)
+	_last_battery_position = current_position
+	_robot_movement_status = status
+	_robot_speed = speed
+	_robot_destination = destination
+	_update_movement_ui()
+
+
+func _update_movement_ui() -> void:
 	var destination_text := "—"
 	if destination_marker.visible:
-		destination_text = "(%.1f, %.1f)" % [destination.x, destination.z]
-	status_label.text = "Robot01\nStatus: %s\nSpeed: %.2f m/s\nDestination: %s" % [
-		status, speed, destination_text
+		destination_text = "(%.1f, %.1f)" % [
+			_robot_destination.x, _robot_destination.z
+		]
+	var display_status := _robot_movement_status
+	if _charge_state == ChargeState.TRAVELLING:
+		display_status = "To Charger"
+	elif _charge_state == ChargeState.CHARGING:
+		display_status = "Charging"
+	status_label.text = "Robot01\nStatus: %s\nSpeed: %.2f m/s\nDestination: %s\nBattery: %.1f%% [%s]   [C] Charge" % [
+		display_status,
+		_robot_speed,
+		destination_text,
+		_battery_percent,
+		_battery_status_name(),
 	]
+
+
+func _battery_status_name() -> String:
+	if _battery_percent <= 0.0:
+		return "EMPTY"
+	if _battery_percent <= BATTERY_LOW_PERCENT:
+		return "LOW"
+	return "OK"
+
+
+func _request_charge() -> void:
+	if not _navigation_ready:
+		print("Charge unavailable: navigation is not ready")
+		return
+	if _charge_state != ChargeState.NONE:
+		print("Charge already in progress")
+		return
+	if _is_job_active() or not _job_queue.is_empty() or _queued_start_scheduled:
+		print("Charge unavailable: warehouse jobs are active or pending")
+		return
+	if _battery_percent >= 99.9:
+		print("Charge not required: battery full")
+		return
+	_begin_charge_trip()
+
+
+func _begin_charge_trip() -> void:
+	var authored_position: Vector3 = charging_target.global_position
+	var navigation_map: RID = navigation_region.get_navigation_map()
+	var navigation_position: Vector3 = NavigationServer3D.map_get_closest_point(
+		navigation_map, authored_position
+	)
+	var horizontal_snap_distance: float = Vector2(
+		navigation_position.x - authored_position.x,
+		navigation_position.z - authored_position.z
+	).length()
+	print("Charge target authored position: %s" % _format_vector3(authored_position))
+	print("Charge target navigation position: %s" % _format_vector3(navigation_position))
+	print("Charge target horizontal snap distance: %.3f" % horizontal_snap_distance)
+	if horizontal_snap_distance > CHARGE_TARGET_MAX_HORIZONTAL_SNAP:
+		print("Charge unavailable: target is %.3f m from the NavigationMesh" % horizontal_snap_distance)
+		_charge_state = ChargeState.NONE
+		return
+	_charge_state = ChargeState.TRAVELLING
+	destination_marker.global_position = Vector3(
+		navigation_position.x, authored_position.y + 0.04, navigation_position.z
+	)
+	destination_marker.visible = true
+	_robot_destination = navigation_position
+	_update_movement_ui()
+	robot.set_navigation_target(navigation_position)
+
+
+func _begin_station_charging() -> void:
+	_charge_state = ChargeState.CHARGING
+	destination_marker.visible = false
+	_robot_speed = 0.0
+	_update_movement_ui()
+	print("Robot01 charging started")
+	await get_tree().create_timer(CHARGE_DURATION_SECONDS).timeout
+	if _charge_state != ChargeState.CHARGING:
+		return
+	_battery_percent = BATTERY_MAX_PERCENT
+	_last_battery_position = robot.global_position
+	_charge_state = ChargeState.NONE
+	_update_movement_ui()
+	print("Robot01 charging complete: %.1f%%" % _battery_percent)
