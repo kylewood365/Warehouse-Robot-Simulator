@@ -593,6 +593,14 @@ func _robot_is_available(state: Dictionary) -> bool:
 func _robot_has_autonomous_workload(fleet_robot: RobotController) -> bool:
 	var state: Dictionary = _robot_state[fleet_robot]
 	return _is_job_active(state) or state.charge_state != ChargeState.NONE
+func _fleet_has_warehouse_workload() -> bool:
+	if not _job_queue.is_empty() or _dispatch_scheduled:
+		return true
+	for fleet_robot in robots:
+		var state: Dictionary = _robot_state[fleet_robot]
+		if _is_job_active(state):
+			return true
+	return false
 
 func _update_job_ui(status: String) -> void:
 	job_status_label.text = "Warehouse Jobs\n1–4: Normal jobs\nQ/W/E/R: High priority\nCancel pending: [Z] next  [X] latest\nStatus: %s\n%s" % [status, _queue_ui_text()]
@@ -638,6 +646,8 @@ func _battery_status_name(state: Dictionary) -> String:
 	return "OK"
 
 func _request_charge() -> void:
+	if _fleet_has_warehouse_workload():
+		print("Charge unavailable: warehouse jobs are active or pending"); return
 	var state: Dictionary = _robot_state[robot_01]
 	if not _navigation_ready or not _robot_is_available(state):
 		print("Robot01 charge unavailable"); return
