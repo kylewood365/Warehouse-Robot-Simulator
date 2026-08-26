@@ -151,6 +151,14 @@ position = Vector3(11, 0, -10.8)
 rotation_degrees = Vector3(0, 180, 0)
 [node name="Robot01" parent="." instance=ExtResource("2_robot")]
 position = Vector3(0, 0, 7.8)
+; Phase 3N deliberately lets fleet robots pass through one another to avoid
+; route-crossing deadlocks. NavigationAgent avoidance is deferred to a later phase.
+collision_layer = 2
+collision_mask = 1
+[node name="Robot02" parent="." instance=ExtResource("2_robot")]
+position = Vector3(3, 0, 7.8)
+collision_layer = 2
+collision_mask = 1
 
 [node name="JobTargets" type="Node3D" parent="."]
 [node name="Shelf01Pickup" type="Marker3D" parent="JobTargets"]
@@ -161,8 +169,10 @@ position = Vector3(-3, 0, 4.3)
 position = Vector3(3, 0, 4.3)
 [node name="Shelf04Pickup" type="Marker3D" parent="JobTargets"]
 position = Vector3(9, 0, 4.3)
-[node name="PackingDropoff" type="Marker3D" parent="JobTargets"]
-position = Vector3(-10.5, 0, 6.2)
+[node name="Robot01PackingDropoff" type="Marker3D" parent="JobTargets"]
+position = Vector3(-11.6, 0, 6.2)
+[node name="Robot02PackingDropoff" type="Marker3D" parent="JobTargets"]
+position = Vector3(-9.4, 0, 6.2)
 [node name="ChargingTarget" type="Marker3D" parent="JobTargets"]
 position = Vector3(11, 0, -9.3)
 
@@ -339,7 +349,7 @@ fov = 57.0
 offset_left = 16.0
 offset_top = 16.0
 offset_right = 268.0
-offset_bottom = 144.0
+offset_bottom = 202.0
 theme_override_styles/panel = SubResource("PanelStyle")
 [node name="Margin" type="MarginContainer" parent="MovementUI/Panel"]
 theme_override_constants/margin_left = 14
@@ -347,7 +357,7 @@ theme_override_constants/margin_top = 10
 theme_override_constants/margin_right = 14
 theme_override_constants/margin_bottom = 10
 [node name="Readout" type="Label" parent="MovementUI/Panel/Margin"]
-text = "Robot01\nStatus: Preparing navigation...\nSpeed: 0.00 m/s\nDestination: —\nBattery: 100.0% [OK]   [C] Charge"
+text = "Robot01: Preparing navigation... | Battery 100.0% [OK]\nRobot02: Preparing navigation... | Battery 100.0% [OK]\n\n[C] Charge Robot01"
 theme_override_colors/font_color = Color(0.9, 0.96, 1, 1)
 theme_override_font_sizes/font_size = 16
 
