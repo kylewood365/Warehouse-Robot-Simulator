@@ -27,7 +27,8 @@ const CHARGE_TARGET_MAX_HORIZONTAL_SNAP := 0.75
 @onready var shelf_02_pickup: Marker3D = $JobTargets/Shelf02Pickup
 @onready var shelf_03_pickup: Marker3D = $JobTargets/Shelf03Pickup
 @onready var shelf_04_pickup: Marker3D = $JobTargets/Shelf04Pickup
-@onready var packing_dropoff: Marker3D = $JobTargets/PackingDropoff
+@onready var robot_01_packing_dropoff: Marker3D = $JobTargets/Robot01PackingDropoff
+@onready var robot_02_packing_dropoff: Marker3D = $JobTargets/Robot02PackingDropoff
 @onready var charging_target: Marker3D = $JobTargets/ChargingTarget
 @onready var shelf_01_source_package: MeshInstance3D = $Shelving/ShelfRow01/PackageD
 @onready var shelf_02_source_package: MeshInstance3D = $Shelving/ShelfRow02/PackageD
@@ -62,6 +63,7 @@ var _dispatch_scheduled := false
 var _delivery_flash_id := 0
 var _available_stock: Dictionary = {}
 var _robot_state: Dictionary = {}
+var _charging_station_owner: RobotController
 var _jobs_accepted := 0
 var _jobs_completed := 0
 var _jobs_failed := 0
@@ -388,7 +390,10 @@ func _estimate_navigation_path_distance(from_position: Vector3, to_position: Vec
 func _should_charge_before_dispatch(fleet_robot: RobotController, job: Dictionary) -> bool:
 	var state: Dictionary = _robot_state[fleet_robot]
 	var pickup_distance := _estimate_navigation_path_distance(fleet_robot.global_position, job.pickup_marker.global_position)
-	var packing_distance := _estimate_navigation_path_distance(job.pickup_marker.global_position, packing_dropoff.global_position)
+	var packing_dropoff := _packing_dropoff_for(fleet_robot)
+	var packing_distance := _estimate_navigation_path_distance(
+		job.pickup_marker.global_position, packing_dropoff.global_position
+	)
 	var battery: float = state.battery_percent
 	if pickup_distance < 0.0 or packing_distance < 0.0:
 		return battery <= BATTERY_LOW_PERCENT and battery < 99.9
@@ -428,8 +433,14 @@ func _on_robot_navigation_target_failed(destination: Vector3, remaining: float, 
 	if state.charge_state == ChargeState.TRAVELLING:
 		print("%s charge navigation failed at %s (%.3f m)" % [fleet_robot.name, _format_vector3(destination), remaining])
 		state.charge_state = ChargeState.NONE; state.automatic_charge = false
+		if _charging_station_owner == fleet_robot:
+			_charging_station_owner = null
 		_schedule_fleet_dispatch(); _update_movement_ui(); return
-	if _is_job_active(state): _fail_job(fleet_robot, "navigation failed")
+	if _is_job_active(state):
+		_fail_job(fleet_robot, "navigation failed")
+	else:
+		# A failed manual Robot01 target must not leave pending fleet work asleep.
+		_schedule_fleet_dispatch()
 
 func _begin_pickup(fleet_robot: RobotController) -> void:
 	var state: Dictionary = _robot_state[fleet_robot]
@@ -440,7 +451,7 @@ func _begin_pickup(fleet_robot: RobotController) -> void:
 	if state.source_package != null: state.source_package.visible = false
 	_cargo_for(fleet_robot).visible = true
 	state.job_state = JobState.TRAVELLING_TO_PACKING
-	_command_job_target(fleet_robot, packing_dropoff, "Packing Station")
+	_command_job_target(fleet_robot, _packing_dropoff_for(fleet_robot), "Packing Station")
 
 func _complete_job(fleet_robot: RobotController) -> void:
 	var state: Dictionary = _robot_state[fleet_robot]
@@ -544,6 +555,14 @@ func _update_operations_ui() -> void:
 	if _recent_job_history.is_empty(): lines.append("No job history yet")
 	else:
 		for result in _recent_job_history:
+			if result.status == "CANCELLED":
+				lines.append("#%03d [%s] %s CANCELLED wait %.1fs" % [
+					result.id,
+					_priority_name(result.priority),
+					result.pickup_name.replace("Shelf Row ", "Row"),
+					result.wait_time,
+				])
+				continue
 			lines.append("#%03d [%s] %s %s %.1fs%s" % [result.id, _priority_name(result.priority), result.pickup_name.replace("Shelf Row ", "Row"), result.status, result.duration, "" if result.sla_result == "" else " " + result.sla_result])
 	operations_status_label.text = "\n".join(lines)
 
@@ -553,6 +572,8 @@ func _get_source_package_for_pickup(marker: Marker3D) -> MeshInstance3D:
 	if marker == shelf_03_pickup: return shelf_03_source_package
 	if marker == shelf_04_pickup: return shelf_04_source_package
 	return null
+func _packing_dropoff_for(fleet_robot: RobotController) -> Marker3D:
+	return robot_01_packing_dropoff if fleet_robot == robot_01 else robot_02_packing_dropoff
 func _cargo_for(fleet_robot: RobotController) -> MeshInstance3D: return fleet_robot.get_node("CargoMount/CarriedPackage")
 func _show_delivered_package_briefly() -> void:
 	_delivery_flash_id += 1; var flash_id := _delivery_flash_id; delivered_package.visible = true
@@ -618,12 +639,18 @@ func _request_charge() -> void:
 	if state.battery_percent >= 99.9: print("Charge not required: battery full"); return
 	_begin_charge_trip(robot_01, false)
 func _begin_charge_trip(fleet_robot: RobotController, automatic: bool = false) -> void:
+	if _charging_station_owner != null and _charging_station_owner != fleet_robot:
+		print("%s charge waiting: Charging Station occupied by %s" % [
+			fleet_robot.name, _charging_station_owner.name
+		])
+		return
 	var state: Dictionary = _robot_state[fleet_robot]
 	var authored := charging_target.global_position
 	var target := NavigationServer3D.map_get_closest_point(navigation_region.get_navigation_map(), authored)
 	var snap := Vector2(target.x - authored.x, target.z - authored.z).length()
 	if snap > CHARGE_TARGET_MAX_HORIZONTAL_SNAP:
 		print("%s charge unavailable: target off NavigationMesh" % fleet_robot.name); return
+	_charging_station_owner = fleet_robot
 	state.automatic_charge = automatic; state.charge_state = ChargeState.TRAVELLING; state.destination = target
 	fleet_robot.set_navigation_target(target); _update_movement_ui()
 func _begin_station_charging(fleet_robot: RobotController) -> void:
@@ -634,4 +661,6 @@ func _begin_station_charging(fleet_robot: RobotController) -> void:
 	if state.charge_state != ChargeState.CHARGING: return
 	state.battery_percent = BATTERY_MAX_PERCENT; state.last_battery_position = fleet_robot.global_position
 	state.charge_state = ChargeState.NONE; state.automatic_charge = false
+	if _charging_station_owner == fleet_robot:
+		_charging_station_owner = null
 	print("%s charging complete" % fleet_robot.name); _update_movement_ui(); _schedule_fleet_dispatch()

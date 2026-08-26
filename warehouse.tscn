@@ -163,8 +163,10 @@ position = Vector3(-3, 0, 4.3)
 position = Vector3(3, 0, 4.3)
 [node name="Shelf04Pickup" type="Marker3D" parent="JobTargets"]
 position = Vector3(9, 0, 4.3)
-[node name="PackingDropoff" type="Marker3D" parent="JobTargets"]
-position = Vector3(-10.5, 0, 6.2)
+[node name="Robot01PackingDropoff" type="Marker3D" parent="JobTargets"]
+position = Vector3(-11.6, 0, 6.2)
+[node name="Robot02PackingDropoff" type="Marker3D" parent="JobTargets"]
+position = Vector3(-9.4, 0, 6.2)
 [node name="ChargingTarget" type="Marker3D" parent="JobTargets"]
 position = Vector3(11, 0, -9.3)
 
