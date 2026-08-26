@@ -96,6 +96,7 @@ func _new_robot_state(fleet_robot: RobotController) -> Dictionary:
 		"battery_percent": BATTERY_MAX_PERCENT,
 		"last_battery_position": fleet_robot.global_position,
 		"charge_state": ChargeState.NONE, "automatic_charge": false,
+		"automatic_charge_failed": false,
 		"movement_status": "Preparing navigation...", "speed": 0.0,
 		"destination": Vector3.ZERO,
 	}
@@ -354,6 +355,8 @@ func _dispatch_pending_jobs() -> void:
 			var state: Dictionary = _robot_state[fleet_robot]
 			if not _robot_is_available(state): continue
 			if _should_charge_before_dispatch(fleet_robot, job):
+				if state.automatic_charge_failed:
+					continue
 				_begin_charge_trip(fleet_robot, true)
 				continue
 			selected = fleet_robot
@@ -431,8 +434,10 @@ func _on_robot_destination_reached(_destination: Vector3, fleet_robot: RobotCont
 func _on_robot_navigation_target_failed(destination: Vector3, remaining: float, fleet_robot: RobotController) -> void:
 	var state: Dictionary = _robot_state[fleet_robot]
 	if state.charge_state == ChargeState.TRAVELLING:
+		var was_automatic_charge: bool = state.automatic_charge
 		print("%s charge navigation failed at %s (%.3f m)" % [fleet_robot.name, _format_vector3(destination), remaining])
 		state.charge_state = ChargeState.NONE; state.automatic_charge = false
+		state.automatic_charge_failed = was_automatic_charge
 		if _charging_station_owner == fleet_robot:
 			_charging_station_owner = null
 		_schedule_fleet_dispatch(); _update_movement_ui(); return
@@ -651,6 +656,7 @@ func _begin_charge_trip(fleet_robot: RobotController, automatic: bool = false) -
 	if snap > CHARGE_TARGET_MAX_HORIZONTAL_SNAP:
 		print("%s charge unavailable: target off NavigationMesh" % fleet_robot.name); return
 	_charging_station_owner = fleet_robot
+	state.automatic_charge_failed = false
 	state.automatic_charge = automatic; state.charge_state = ChargeState.TRAVELLING; state.destination = target
 	fleet_robot.set_navigation_target(target); _update_movement_ui()
 func _begin_station_charging(fleet_robot: RobotController) -> void:
