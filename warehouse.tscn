@@ -151,14 +151,12 @@ position = Vector3(11, 0, -10.8)
 rotation_degrees = Vector3(0, 180, 0)
 [node name="Robot01" parent="." instance=ExtResource("2_robot")]
 position = Vector3(0, 0, 7.8)
-; Phase 3N deliberately lets fleet robots pass through one another to avoid
-; route-crossing deadlocks. NavigationAgent avoidance is deferred to a later phase.
 collision_layer = 2
-collision_mask = 1
+collision_mask = 3
 [node name="Robot02" parent="." instance=ExtResource("2_robot")]
 position = Vector3(3, 0, 7.8)
 collision_layer = 2
-collision_mask = 1
+collision_mask = 3
 
 [node name="JobTargets" type="Node3D" parent="."]
 [node name="Shelf01Pickup" type="Marker3D" parent="JobTargets"]
@@ -170,9 +168,9 @@ position = Vector3(3, 0, 4.3)
 [node name="Shelf04Pickup" type="Marker3D" parent="JobTargets"]
 position = Vector3(9, 0, 4.3)
 [node name="Robot01PackingDropoff" type="Marker3D" parent="JobTargets"]
-position = Vector3(-11.6, 0, 6.2)
+position = Vector3(-12.2, 0, 6.2)
 [node name="Robot02PackingDropoff" type="Marker3D" parent="JobTargets"]
-position = Vector3(-9.4, 0, 6.2)
+position = Vector3(-7.4, 0, 8.7)
 [node name="ChargingTarget" type="Marker3D" parent="JobTargets"]
 position = Vector3(11, 0, -9.3)
 
