@@ -9,8 +9,9 @@ signal navigation_target_failed(destination: Vector3, horizontal_remaining: floa
 @export var acceleration := 8.0
 @export var turn_speed := 5.0
 
-const ROBOT_01_AVOIDANCE_PRIORITY := 1.0
-const ROBOT_02_AVOIDANCE_PRIORITY := 0.5
+const STATIONARY_AVOIDANCE_PRIORITY := 1.0
+const ROBOT_01_MOVING_AVOIDANCE_PRIORITY := 0.75
+const ROBOT_02_MOVING_AVOIDANCE_PRIORITY := 0.5
 
 @onready var navigation_agent: NavigationAgent3D = $NavigationAgent3D
 
@@ -23,10 +24,7 @@ func _ready() -> void:
 	navigation_agent.path_desired_distance = 0.25
 	navigation_agent.target_desired_distance = 0.3
 	navigation_agent.max_speed = move_speed
-	# Robot02 makes the larger correction in an otherwise symmetrical encounter.
-	navigation_agent.avoidance_priority = (
-		ROBOT_01_AVOIDANCE_PRIORITY if name == &"Robot01" else ROBOT_02_AVOIDANCE_PRIORITY
-	)
+	navigation_agent.avoidance_priority = STATIONARY_AVOIDANCE_PRIORITY
 	navigation_agent.velocity_computed.connect(_on_safe_velocity_computed)
 	movement_changed.emit("Idle", 0.0, Vector3.ZERO)
 
@@ -44,6 +42,10 @@ func set_navigation_target(target: Vector3) -> void:
 	print("Navigation path height offset: %.3f" % height_offset)
 	_destination = Vector3(target.x, global_position.y, target.z)
 	_has_target = true
+	# Moving agents must route around targetless robots, which cannot apply their
+	# own avoidance correction while performing a destination action. Robot02
+	# retains the lower moving priority as the deterministic active-traffic tie-break.
+	navigation_agent.avoidance_priority = _moving_avoidance_priority()
 	_path_diagnostics_pending = true
 	navigation_agent.target_position = target
 	print("Robot navigation target: %s" % _format_vector3(target))
@@ -98,8 +100,16 @@ func _physics_process(delta: float) -> void:
 		_submit_avoidance_velocity(Vector3.ZERO, delta)
 
 
-func _stop_robot(delta: float) -> void:
-	_submit_avoidance_velocity(Vector3.ZERO, delta)
+func _stop_robot(_delta: float) -> void:
+	# A stationary agent has right of way because its safe velocity is
+	# intentionally discarded below. This prevents avoidance from assuming that
+	# an idle robot will move aside and directing an active robot into its body.
+	navigation_agent.avoidance_priority = STATIONARY_AVOIDANCE_PRIORITY
+	navigation_agent.velocity = Vector3.ZERO
+
+
+func _moving_avoidance_priority() -> float:
+	return ROBOT_01_MOVING_AVOIDANCE_PRIORITY if name == &"Robot01" else ROBOT_02_MOVING_AVOIDANCE_PRIORITY
 
 
 func _submit_avoidance_velocity(desired_velocity: Vector3, delta: float) -> void:
