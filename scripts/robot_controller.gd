@@ -115,11 +115,18 @@ func _submit_avoidance_velocity(desired_velocity: Vector3, delta: float) -> void
 
 
 func _on_safe_velocity_computed(safe_velocity: Vector3) -> void:
+	# A targetless agent remains registered with avoidance as a stationary
+	# neighbor, but avoidance must never displace a robot performing an action at
+	# its destination (pickup, packing, or charging).
+	if not _has_target:
+		velocity = Vector3.ZERO
+		movement_changed.emit("Idle", 0.0, _destination)
+		return
+
 	velocity = Vector3(safe_velocity.x, 0.0, safe_velocity.z)
 	if velocity.length_squared() > 0.0001:
 		move_and_slide()
-	var status := "Moving" if _has_target else "Idle"
-	movement_changed.emit(status, Vector2(velocity.x, velocity.z).length(), _destination)
+	movement_changed.emit("Moving", Vector2(velocity.x, velocity.z).length(), _destination)
 
 
 func _get_horizontal_remaining() -> float:
