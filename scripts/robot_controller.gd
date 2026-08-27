@@ -9,6 +9,9 @@ signal navigation_target_failed(destination: Vector3, horizontal_remaining: floa
 @export var acceleration := 8.0
 @export var turn_speed := 5.0
 
+const ROBOT_01_AVOIDANCE_PRIORITY := 1.0
+const ROBOT_02_AVOIDANCE_PRIORITY := 0.5
+
 @onready var navigation_agent: NavigationAgent3D = $NavigationAgent3D
 
 var _destination := Vector3.ZERO
@@ -19,6 +22,12 @@ var _path_diagnostics_pending := false
 func _ready() -> void:
 	navigation_agent.path_desired_distance = 0.25
 	navigation_agent.target_desired_distance = 0.3
+	navigation_agent.max_speed = move_speed
+	# Robot02 makes the larger correction in an otherwise symmetrical encounter.
+	navigation_agent.avoidance_priority = (
+		ROBOT_01_AVOIDANCE_PRIORITY if name == &"Robot01" else ROBOT_02_AVOIDANCE_PRIORITY
+	)
+	navigation_agent.velocity_computed.connect(_on_safe_velocity_computed)
 	movement_changed.emit("Idle", 0.0, Vector3.ZERO)
 
 
@@ -82,25 +91,35 @@ func _physics_process(delta: float) -> void:
 	if direction.length_squared() > 0.0001:
 		direction = direction.normalized()
 		var desired_velocity := direction * move_speed
-		velocity.x = move_toward(velocity.x, desired_velocity.x, acceleration * delta)
-		velocity.z = move_toward(velocity.z, desired_velocity.z, acceleration * delta)
+		_submit_avoidance_velocity(desired_velocity, delta)
 		var target_angle := atan2(direction.x, direction.z)
 		rotation.y = lerp_angle(rotation.y, target_angle, turn_speed * delta)
 	else:
-		velocity.x = move_toward(velocity.x, 0.0, acceleration * delta)
-		velocity.z = move_toward(velocity.z, 0.0, acceleration * delta)
-	velocity.y = 0.0
-	move_and_slide()
-	movement_changed.emit("Moving", Vector2(velocity.x, velocity.z).length(), _destination)
+		_submit_avoidance_velocity(Vector3.ZERO, delta)
 
 
 func _stop_robot(delta: float) -> void:
-	velocity.x = move_toward(velocity.x, 0.0, acceleration * delta)
-	velocity.z = move_toward(velocity.z, 0.0, acceleration * delta)
-	velocity.y = 0.0
+	_submit_avoidance_velocity(Vector3.ZERO, delta)
+
+
+func _submit_avoidance_velocity(desired_velocity: Vector3, delta: float) -> void:
+	var intended_velocity := Vector3(
+		move_toward(velocity.x, desired_velocity.x, acceleration * delta),
+		0.0,
+		move_toward(velocity.z, desired_velocity.z, acceleration * delta)
+	)
+	# NavigationServer emits velocity_computed once for this request. Movement is
+	# performed only in that callback so the unadjusted and safe velocities can
+	# never both move the body in the same physics frame.
+	navigation_agent.velocity = intended_velocity
+
+
+func _on_safe_velocity_computed(safe_velocity: Vector3) -> void:
+	velocity = Vector3(safe_velocity.x, 0.0, safe_velocity.z)
 	if velocity.length_squared() > 0.0001:
 		move_and_slide()
-	movement_changed.emit("Idle", Vector2(velocity.x, velocity.z).length(), _destination)
+	var status := "Moving" if _has_target else "Idle"
+	movement_changed.emit(status, Vector2(velocity.x, velocity.z).length(), _destination)
 
 
 func _get_horizontal_remaining() -> float:
