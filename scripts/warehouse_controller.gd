@@ -20,6 +20,8 @@ const CHARGE_TARGET_MAX_HORIZONTAL_SNAP := 0.75
 # Treat sub-decimetre route differences as equal so floating-point path noise
 # never changes the deterministic Robot01 tie-break.
 const DISPATCH_DISTANCE_TIE_EPSILON := 0.1
+const AUTO_JOB_INTERVAL_SECONDS := 4.0
+const AUTO_HIGH_PRIORITY_CHANCE := 0.2
 
 @onready var navigation_region: NavigationRegion3D = $NavigationRegion3D
 @onready var robot_01: RobotController = $Robot01
@@ -76,9 +78,18 @@ var _completed_execution_seconds := 0.0
 var _sla_on_time := 0
 var _sla_late := 0
 var _recent_job_history: Array[Dictionary] = []
+var _automatic_workload_enabled := false
+var _automatic_job_timer: Timer
+var _automatic_job_rng := RandomNumberGenerator.new()
 
 func _ready() -> void:
 	_available_stock = {shelf_01_pickup: 3, shelf_02_pickup: 3, shelf_03_pickup: 3, shelf_04_pickup: 3}
+	_automatic_job_rng.randomize()
+	_automatic_job_timer = Timer.new()
+	_automatic_job_timer.name = "AutomaticJobTimer"
+	_automatic_job_timer.wait_time = AUTO_JOB_INTERVAL_SECONDS
+	_automatic_job_timer.timeout.connect(_on_automatic_job_timer_timeout)
+	add_child(_automatic_job_timer)
 	for fleet_robot in robots:
 		_robot_state[fleet_robot] = _new_robot_state(fleet_robot)
 		fleet_robot.movement_changed.connect(_on_robot_movement_changed.bind(fleet_robot))
@@ -183,6 +194,10 @@ func _input(event: InputEvent) -> void:
 			var is_restock := false
 			var priority := JobPriority.NORMAL
 			match key_event.keycode:
+				KEY_A:
+					_toggle_automatic_workload()
+					get_viewport().set_input_as_handled()
+					return
 				KEY_C:
 					_request_charge()
 					get_viewport().set_input_as_handled()
@@ -302,16 +317,51 @@ func _input(event: InputEvent) -> void:
 	get_viewport().set_input_as_handled()
 
 
-func _request_job(pickup_marker: Marker3D, pickup_name: String, priority: int = JobPriority.NORMAL) -> void:
+func _toggle_automatic_workload() -> void:
+	_automatic_workload_enabled = not _automatic_workload_enabled
+	if _automatic_workload_enabled:
+		_automatic_job_timer.start()
+	else:
+		_automatic_job_timer.stop()
+	print("Automatic workload: %s" % ("ON" if _automatic_workload_enabled else "OFF"))
+	_update_operations_ui()
+
+
+func _on_automatic_job_timer_timeout() -> void:
+	if not _automatic_workload_enabled:
+		return
+	var available_rows: Array[Dictionary] = []
+	var rows: Array[Dictionary] = [
+		{"marker": shelf_01_pickup, "name": "Shelf Row 01"},
+		{"marker": shelf_02_pickup, "name": "Shelf Row 02"},
+		{"marker": shelf_03_pickup, "name": "Shelf Row 03"},
+		{"marker": shelf_04_pickup, "name": "Shelf Row 04"},
+	]
+	for row in rows:
+		if _has_available_stock(row.marker as Marker3D):
+			available_rows.append(row)
+	if available_rows.is_empty():
+		print("Automatic workload skipped: no inventory available")
+		return
+
+	var selected_row: Dictionary = available_rows[_automatic_job_rng.randi_range(0, available_rows.size() - 1)]
+	var priority := JobPriority.HIGH if _automatic_job_rng.randf() < AUTO_HIGH_PRIORITY_CHANCE else JobPriority.NORMAL
+	if _request_job(selected_row.marker as Marker3D, selected_row.name, priority):
+		print("Automatic order generated: %s [%s]" % [
+			selected_row.name, _priority_name(priority),
+		])
+
+
+func _request_job(pickup_marker: Marker3D, pickup_name: String, priority: int = JobPriority.NORMAL) -> bool:
 	if not _navigation_ready:
 		print("Job start unavailable: navigation is not ready")
-		return
+		return false
 	if _job_queue.size() >= MAX_PENDING_JOBS:
 		print("Job queue full: request rejected")
-		return
+		return false
 	if not _has_available_stock(pickup_marker) or not _reserve_stock(pickup_marker, pickup_name):
 		print("Job rejected: %s out of stock" % pickup_name)
-		return
+		return false
 	var job := {"id": _next_job_id, "pickup_marker": pickup_marker, "pickup_name": pickup_name,
 		"priority": priority, "accepted_msec": Time.get_ticks_msec(),
 		"sla_seconds": _sla_seconds_for_priority(priority)}
@@ -328,6 +378,7 @@ func _request_job(pickup_marker: Marker3D, pickup_name: String, priority: int = 
 		_schedule_fleet_dispatch()
 	_update_job_ui(_job_status_text())
 	_update_operations_ui()
+	return true
 
 func _find_dispatchable_robot(job: Dictionary) -> RobotController:
 	var selection: Dictionary = _select_robot_for_job(job, false)
@@ -734,7 +785,7 @@ func _update_operations_ui() -> void:
 		if not state.is_empty() and _is_job_active(state): active.append("%s #%03d" % [fleet_robot.name, state.job.id])
 	var average := "--" if _jobs_completed == 0 else "%.1fs" % (_completed_execution_seconds / _jobs_completed)
 	var hit_rate := "--" if _jobs_completed == 0 else "%.1f%%" % (float(_sla_on_time) / _jobs_completed * 100.0)
-	var lines: Array[String] = ["Operations", "Accepted: %d" % _jobs_accepted, "Completed: %d" % _jobs_completed, "Failed: %d" % _jobs_failed, "Cancelled: %d" % _jobs_cancelled, "Active: %s" % ("None" if active.is_empty() else ", ".join(active)), "Avg complete: %s" % average, "SLA on-time: %d" % _sla_on_time, "SLA late: %d" % _sla_late, "SLA hit rate: %s" % hit_rate, "SLA targets: N 20s / H 12s", "", "Recent"]
+	var lines: Array[String] = ["Operations", "Auto Orders: %s [A]" % ("ON" if _automatic_workload_enabled else "OFF"), "Accepted: %d" % _jobs_accepted, "Completed: %d" % _jobs_completed, "Failed: %d" % _jobs_failed, "Cancelled: %d" % _jobs_cancelled, "Active: %s" % ("None" if active.is_empty() else ", ".join(active)), "Avg complete: %s" % average, "SLA on-time: %d" % _sla_on_time, "SLA late: %d" % _sla_late, "SLA hit rate: %s" % hit_rate, "SLA targets: N 20s / H 12s", "", "Recent"]
 	if _recent_job_history.is_empty(): lines.append("No job history yet")
 	else:
 		for result in _recent_job_history:
