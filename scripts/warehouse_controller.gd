@@ -3,6 +3,7 @@ extends Node3D
 enum JobState { IDLE, TRAVELLING_TO_PICKUP, PICKING, TRAVELLING_TO_PACKING, COMPLETE, FAILED }
 enum JobPriority { NORMAL, HIGH }
 enum ChargeState { NONE, TRAVELLING, CHARGING }
+enum DispatchReadiness { READY, CHARGE_REQUIRED, INFEASIBLE }
 
 const JOB_TARGET_MAX_HORIZONTAL_SNAP := 0.75
 const MAX_PENDING_JOBS := 5
@@ -16,6 +17,9 @@ const BATTERY_DRAIN_PER_METER := 1.0
 const BATTERY_DISPATCH_RESERVE_PERCENT := 10.0
 const CHARGE_DURATION_SECONDS := 4.0
 const CHARGE_TARGET_MAX_HORIZONTAL_SNAP := 0.75
+# Treat sub-decimetre route differences as equal so floating-point path noise
+# never changes the deterministic Robot01 tie-break.
+const DISPATCH_DISTANCE_TIE_EPSILON := 0.1
 
 @onready var navigation_region: NavigationRegion3D = $NavigationRegion3D
 @onready var robot_01: RobotController = $Robot01
@@ -313,8 +317,10 @@ func _request_job(pickup_marker: Marker3D, pickup_name: String, priority: int = 
 		"sla_seconds": _sla_seconds_for_priority(priority)}
 	_next_job_id += 1
 	_jobs_accepted += 1
-	var selected_robot := _find_dispatchable_robot(job)
-	if selected_robot != null and _job_queue.is_empty():
+	var selected_robot: RobotController = null
+	if _job_queue.is_empty():
+		selected_robot = _find_dispatchable_robot(job)
+	if selected_robot != null:
 		_begin_job(selected_robot, job)
 	else:
 		_enqueue_job_by_priority(job)
@@ -324,12 +330,13 @@ func _request_job(pickup_marker: Marker3D, pickup_name: String, priority: int = 
 	_update_operations_ui()
 
 func _find_dispatchable_robot(job: Dictionary) -> RobotController:
-	for fleet_robot in robots:
-		var state: Dictionary = _robot_state[fleet_robot]
-		if _robot_is_available(state):
-			if job.is_empty() or not _should_charge_before_dispatch(fleet_robot, job):
-				return fleet_robot
-	return null
+	var selection: Dictionary = _select_robot_for_job(job, false)
+	var candidate: Dictionary = selection.get("candidate", {})
+	if candidate.is_empty() or bool(candidate.requires_charge):
+		return null
+	_log_dispatch_selection(job, selection)
+	_log_full_battery_dispatch(job, candidate)
+	return candidate.robot as RobotController
 
 func _enqueue_job_by_priority(job: Dictionary) -> void:
 	if job.priority == JobPriority.NORMAL:
@@ -350,18 +357,17 @@ func _dispatch_pending_jobs() -> void:
 	if not _navigation_ready: return
 	while not _job_queue.is_empty():
 		var job: Dictionary = _job_queue.front()
-		var selected: RobotController = null
-		for fleet_robot in robots:
-			var state: Dictionary = _robot_state[fleet_robot]
-			if not _robot_is_available(state): continue
-			if _should_charge_before_dispatch(fleet_robot, job):
-				if state.automatic_charge_failed:
-					continue
-				_begin_charge_trip(fleet_robot, true)
-				continue
-			selected = fleet_robot
+		var selection: Dictionary = _select_robot_for_job(job)
+		var candidate: Dictionary = selection.get("candidate", {})
+		if candidate.is_empty(): break
+		var selected: RobotController = candidate.robot as RobotController
+		if bool(candidate.requires_charge):
+			print("%s automatically charging before Job #%03d; job remains pending" % [
+				selected.name, job.id,
+			])
+			_begin_charge_trip(selected, true)
 			break
-		if selected == null: break
+		_log_full_battery_dispatch(job, candidate)
 		_job_queue.pop_front()
 		_begin_job(selected, job)
 	_update_job_ui(_job_status_text())
@@ -390,22 +396,194 @@ func _estimate_navigation_path_distance(from_position: Vector3, to_position: Vec
 		distance += Vector2(path[index].x - path[index - 1].x, path[index].z - path[index - 1].z).length()
 	return distance
 
-func _should_charge_before_dispatch(fleet_robot: RobotController, job: Dictionary) -> bool:
-	var state: Dictionary = _robot_state[fleet_robot]
-	var pickup_distance := _estimate_navigation_path_distance(fleet_robot.global_position, job.pickup_marker.global_position)
+func _estimate_job_route(fleet_robot: RobotController, job: Dictionary) -> Dictionary:
+	var pickup_marker: Marker3D = job.pickup_marker as Marker3D
+	var pickup_distance := _estimate_navigation_path_distance(
+		fleet_robot.global_position, pickup_marker.global_position
+	)
 	var packing_dropoff := _packing_dropoff_for(fleet_robot)
 	var packing_distance := _estimate_navigation_path_distance(
-		job.pickup_marker.global_position, packing_dropoff.global_position
+		pickup_marker.global_position, packing_dropoff.global_position
 	)
-	var battery: float = state.battery_percent
 	if pickup_distance < 0.0 or packing_distance < 0.0:
-		return battery <= BATTERY_LOW_PERCENT and battery < 99.9
-	var required := (pickup_distance + packing_distance) * BATTERY_DRAIN_PER_METER + BATTERY_DISPATCH_RESERVE_PERCENT
-	print("%s battery dispatch check Job #%03d: current %.1f%%, required %.1f%%" % [fleet_robot.name, job.id, battery, required])
-	if battery >= 99.9:
-		if required > BATTERY_MAX_PERCENT: print("Job requirement exceeds capacity — dispatching full %s" % fleet_robot.name)
-		return false
-	return battery <= BATTERY_LOW_PERCENT or battery < required
+		return {"valid": false}
+	var route_distance: float = pickup_distance + packing_distance
+	var predicted_consumption := route_distance * BATTERY_DRAIN_PER_METER
+	return {
+		"valid": true,
+		"distance": route_distance,
+		"predicted_consumption": predicted_consumption,
+		"required_battery": predicted_consumption + BATTERY_DISPATCH_RESERVE_PERCENT,
+	}
+
+func _evaluate_dispatch_candidate(fleet_robot: RobotController, job: Dictionary) -> Dictionary:
+	var state: Dictionary = _robot_state[fleet_robot]
+	var battery: float = state.battery_percent
+	var estimate: Dictionary = _estimate_job_route(fleet_robot, job)
+	if not bool(estimate.get("valid", false)):
+		# Preserve the established LOW-threshold fallback when NavigationServer
+		# cannot provide a meaningful predictive route.
+		var fallback_charge_required := battery <= BATTERY_LOW_PERCENT and battery < 99.9
+		return {
+			"robot": fleet_robot,
+			"estimate_valid": false,
+			"distance": -1.0,
+			"required_battery": -1.0,
+			"readiness": DispatchReadiness.CHARGE_REQUIRED \
+					if fallback_charge_required else DispatchReadiness.READY,
+			"requires_charge": fallback_charge_required,
+			"charge_blocked": fallback_charge_required and bool(state.automatic_charge_failed),
+		}
+
+	var required_battery: float = estimate.required_battery
+	var readiness := DispatchReadiness.READY
+	var requires_charge := false
+	if required_battery > BATTERY_MAX_PERCENT:
+		readiness = DispatchReadiness.INFEASIBLE
+		# Match the existing full-battery guard: charge once when below full,
+		# then dispatch rather than leaving an impossible job queued forever.
+		requires_charge = battery < 99.9
+	elif battery < 99.9 and (
+			battery <= BATTERY_LOW_PERCENT or battery < required_battery
+	):
+		readiness = DispatchReadiness.CHARGE_REQUIRED
+		requires_charge = true
+	return {
+		"robot": fleet_robot,
+		"estimate_valid": true,
+		"distance": estimate.distance,
+		"required_battery": required_battery,
+		"readiness": readiness,
+		"requires_charge": requires_charge,
+		"charge_blocked": requires_charge and bool(state.automatic_charge_failed),
+	}
+
+func _select_robot_for_job(job: Dictionary, emit_diagnostics: bool = true) -> Dictionary:
+	var candidates: Array[Dictionary] = []
+	for fleet_robot in robots:
+		var state: Dictionary = _robot_state[fleet_robot]
+		if _robot_is_available(state):
+			candidates.append(_evaluate_dispatch_candidate(fleet_robot, job))
+	if candidates.is_empty():
+		return {}
+
+	var valid_feasible: Array[Dictionary] = []
+	var fallback_feasible: Array[Dictionary] = []
+	var infeasible: Array[Dictionary] = []
+	for candidate in candidates:
+		if bool(candidate.charge_blocked):
+			continue
+		if int(candidate.readiness) == DispatchReadiness.INFEASIBLE:
+			infeasible.append(candidate)
+		elif bool(candidate.estimate_valid):
+			valid_feasible.append(candidate)
+		else:
+			fallback_feasible.append(candidate)
+
+	var selection_pool: Array[Dictionary] = valid_feasible
+	if selection_pool.is_empty():
+		selection_pool = fallback_feasible
+	if selection_pool.is_empty():
+		selection_pool = infeasible
+	if selection_pool.is_empty():
+		return {}
+
+	var chosen: Dictionary = selection_pool.front()
+	for candidate in selection_pool.slice(1):
+		if _dispatch_candidate_is_better(candidate, chosen):
+			chosen = candidate
+	var selection := {
+		"candidate": chosen,
+		"candidates": candidates,
+		"reason": _dispatch_selection_reason(chosen, candidates),
+	}
+	if emit_diagnostics:
+		_log_dispatch_selection(job, selection)
+	return selection
+
+func _dispatch_candidate_is_better(candidate: Dictionary, incumbent: Dictionary) -> bool:
+	var candidate_readiness := int(candidate.readiness)
+	var incumbent_readiness := int(incumbent.readiness)
+	if candidate_readiness != incumbent_readiness:
+		return candidate_readiness < incumbent_readiness
+	if bool(candidate.estimate_valid) and bool(incumbent.estimate_valid):
+		var distance_difference: float = float(candidate.distance) - float(incumbent.distance)
+		if absf(distance_difference) > DISPATCH_DISTANCE_TIE_EPSILON:
+			return distance_difference < 0.0
+	# Candidate lists follow fleet order, so keeping the incumbent makes
+	# Robot01 the deterministic winner for ties and unavailable estimates.
+	return false
+
+func _dispatch_selection_reason(chosen: Dictionary, candidates: Array[Dictionary]) -> String:
+	var chosen_robot: RobotController = chosen.robot as RobotController
+	var competing: Array[Dictionary] = []
+	for candidate in candidates:
+		if candidate.robot != chosen_robot and not bool(candidate.charge_blocked):
+			competing.append(candidate)
+	if competing.is_empty():
+		return "only dispatchable robot"
+
+	for candidate in competing:
+		if bool(chosen.estimate_valid) and not bool(candidate.estimate_valid) \
+				and int(chosen.readiness) != DispatchReadiness.INFEASIBLE:
+			return "valid route estimate"
+	if not bool(chosen.estimate_valid):
+		for candidate in competing:
+			if int(candidate.readiness) != int(chosen.readiness):
+				return "battery readiness fallback"
+		return "route estimates unavailable; deterministic fallback"
+	for candidate in competing:
+		if int(chosen.readiness) == DispatchReadiness.READY \
+				and int(candidate.readiness) == DispatchReadiness.CHARGE_REQUIRED:
+			return "avoids pre-dispatch charge"
+	if int(chosen.readiness) == DispatchReadiness.INFEASIBLE:
+		return "full-battery fallback"
+	for candidate in competing:
+		if int(candidate.readiness) != int(chosen.readiness) \
+				or not bool(candidate.estimate_valid):
+			continue
+		if absf(float(chosen.distance) - float(candidate.distance)) \
+				<= DISPATCH_DISTANCE_TIE_EPSILON:
+			return "distance tie"
+		return "shorter route"
+	return "battery readiness"
+
+func _log_dispatch_selection(job: Dictionary, selection: Dictionary) -> void:
+	var candidates: Array[Dictionary] = selection.candidates
+	print("Dispatch evaluation Job #%03d:" % job.id)
+	for candidate in candidates:
+		var fleet_robot: RobotController = candidate.robot as RobotController
+		var state: Dictionary = _robot_state[fleet_robot]
+		var route_text := "unavailable"
+		if bool(candidate.estimate_valid):
+			route_text = "%.1fm" % float(candidate.distance)
+		var blocked_text := " (charge retry blocked)" if bool(candidate.charge_blocked) else ""
+		print("  %s: route %s | battery %.1f%% | %s%s" % [
+			fleet_robot.name,
+			route_text,
+			float(state.battery_percent),
+			_dispatch_readiness_name(int(candidate.readiness)),
+			blocked_text,
+		])
+	var chosen: Dictionary = selection.candidate
+	var chosen_robot: RobotController = chosen.robot as RobotController
+	print("Smart dispatch Job #%03d -> %s (%s)" % [
+		job.id, chosen_robot.name, selection.reason,
+	])
+
+func _log_full_battery_dispatch(job: Dictionary, candidate: Dictionary) -> void:
+	if int(candidate.readiness) != DispatchReadiness.INFEASIBLE:
+		return
+	var fleet_robot: RobotController = candidate.robot as RobotController
+	print("Job #%03d requirement exceeds capacity — dispatching full %s" % [
+		job.id, fleet_robot.name,
+	])
+
+func _dispatch_readiness_name(readiness: int) -> String:
+	match readiness:
+		DispatchReadiness.READY: return "READY"
+		DispatchReadiness.CHARGE_REQUIRED: return "CHARGE_REQUIRED"
+		_: return "INFEASIBLE"
 
 func _command_job_target(fleet_robot: RobotController, marker: Marker3D, target_name: String) -> void:
 	var result := _get_navigation_target_for_job(fleet_robot, marker, target_name)
