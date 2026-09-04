@@ -205,7 +205,7 @@ func _input(event: InputEvent) -> void:
 			match key_event.keycode:
 				KEY_M:
 					_request_random_multi_item_order(
-						JobPriority.HIGH if key_event.shift_pressed else JobPriority.NORMAL
+						JobPriority.HIGH if key_event.shift_pressed or Input.is_key_pressed(KEY_SHIFT) else JobPriority.NORMAL
 					)
 					get_viewport().set_input_as_handled()
 					return
