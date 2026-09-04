@@ -2,6 +2,7 @@ extends Node3D
 
 enum JobState { IDLE, TRAVELLING_TO_PICKUP, PICKING, TRAVELLING_TO_PACKING, COMPLETE, FAILED }
 enum JobPriority { NORMAL, HIGH }
+enum OrderState { OPEN, COMPLETE, FAILED, CANCELLED }
 enum ChargeState { NONE, TRAVELLING, CHARGING }
 enum DispatchReadiness { READY, CHARGE_REQUIRED, INFEASIBLE }
 
@@ -22,6 +23,8 @@ const CHARGE_TARGET_MAX_HORIZONTAL_SNAP := 0.75
 const DISPATCH_DISTANCE_TIE_EPSILON := 0.1
 const AUTO_JOB_INTERVAL_SECONDS := 4.0
 const AUTO_HIGH_PRIORITY_CHANCE := 0.2
+const AUTO_MULTI_ITEM_ORDER_CHANCE := 0.35
+const MULTI_ITEM_ORDER_SIZE := 2
 
 @onready var navigation_region: NavigationRegion3D = $NavigationRegion3D
 @onready var robot_01: RobotController = $Robot01
@@ -64,7 +67,10 @@ const AUTO_HIGH_PRIORITY_CHANCE := 0.2
 
 var _navigation_ready := false
 var _next_job_id := 1
+var _next_order_id := 1
 var _job_queue: Array[Dictionary] = []
+var _orders: Dictionary = {}
+var _order_child_results: Dictionary = {}
 var _dispatch_scheduled := false
 var _delivery_flash_id := 0
 var _available_stock: Dictionary = {}
@@ -74,6 +80,9 @@ var _jobs_accepted := 0
 var _jobs_completed := 0
 var _jobs_failed := 0
 var _jobs_cancelled := 0
+var _orders_completed := 0
+var _orders_failed := 0
+var _orders_cancelled := 0
 var _completed_execution_seconds := 0.0
 var _sla_on_time := 0
 var _sla_late := 0
@@ -194,6 +203,12 @@ func _input(event: InputEvent) -> void:
 			var is_restock := false
 			var priority := JobPriority.NORMAL
 			match key_event.keycode:
+				KEY_M:
+					_request_random_multi_item_order(
+						JobPriority.HIGH if key_event.shift_pressed or Input.is_key_pressed(KEY_SHIFT) else JobPriority.NORMAL
+					)
+					get_viewport().set_input_as_handled()
+					return
 				KEY_A:
 					_toggle_automatic_workload()
 					get_viewport().set_input_as_handled()
@@ -330,22 +345,26 @@ func _toggle_automatic_workload() -> void:
 func _on_automatic_job_timer_timeout() -> void:
 	if not _automatic_workload_enabled:
 		return
-	var available_rows: Array[Dictionary] = []
-	var rows: Array[Dictionary] = [
-		{"marker": shelf_01_pickup, "name": "Shelf Row 01"},
-		{"marker": shelf_02_pickup, "name": "Shelf Row 02"},
-		{"marker": shelf_03_pickup, "name": "Shelf Row 03"},
-		{"marker": shelf_04_pickup, "name": "Shelf Row 04"},
-	]
-	for row in rows:
-		if _has_available_stock(row.marker as Marker3D):
-			available_rows.append(row)
+	var available_rows := _stocked_rows()
 	if available_rows.is_empty():
 		print("Automatic workload skipped: no inventory available")
 		return
 
-	var selected_row: Dictionary = available_rows[_automatic_job_rng.randi_range(0, available_rows.size() - 1)]
 	var priority := JobPriority.HIGH if _automatic_job_rng.randf() < AUTO_HIGH_PRIORITY_CHANCE else JobPriority.NORMAL
+	if available_rows.size() >= MULTI_ITEM_ORDER_SIZE \
+			and _job_queue.size() + MULTI_ITEM_ORDER_SIZE <= MAX_PENDING_JOBS \
+			and _automatic_job_rng.randf() < AUTO_MULTI_ITEM_ORDER_CHANCE:
+		var selected_rows := _choose_two_rows(available_rows)
+		if _request_multi_item_order(selected_rows, priority):
+			print("Automatic multi-item order generated: Order #%03d — %s + %s [%s]" % [
+				_next_order_id - 1, selected_rows[0].name, selected_rows[1].name,
+				_priority_name(priority),
+			])
+			return
+
+	# A multi-item attempt that cannot fit always degrades to the established
+	# single-job path instead of wasting an automatic workload tick.
+	var selected_row: Dictionary = available_rows[_automatic_job_rng.randi_range(0, available_rows.size() - 1)]
 	if _request_job(selected_row.marker as Marker3D, selected_row.name, priority):
 		print("Automatic order generated: %s [%s]" % [
 			selected_row.name, _priority_name(priority),
@@ -362,11 +381,7 @@ func _request_job(pickup_marker: Marker3D, pickup_name: String, priority: int = 
 	if not _has_available_stock(pickup_marker) or not _reserve_stock(pickup_marker, pickup_name):
 		print("Job rejected: %s out of stock" % pickup_name)
 		return false
-	var job := {"id": _next_job_id, "pickup_marker": pickup_marker, "pickup_name": pickup_name,
-		"priority": priority, "accepted_msec": Time.get_ticks_msec(),
-		"sla_seconds": _sla_seconds_for_priority(priority)}
-	_next_job_id += 1
-	_jobs_accepted += 1
+	var job := _create_job(pickup_marker, pickup_name, priority)
 	var selected_robot: RobotController = null
 	if _job_queue.is_empty():
 		selected_robot = _find_dispatchable_robot(job)
@@ -379,6 +394,106 @@ func _request_job(pickup_marker: Marker3D, pickup_name: String, priority: int = 
 	_update_job_ui(_job_status_text())
 	_update_operations_ui()
 	return true
+
+func _warehouse_rows() -> Array[Dictionary]:
+	return [
+		{"marker": shelf_01_pickup, "name": "Shelf Row 01"},
+		{"marker": shelf_02_pickup, "name": "Shelf Row 02"},
+		{"marker": shelf_03_pickup, "name": "Shelf Row 03"},
+		{"marker": shelf_04_pickup, "name": "Shelf Row 04"},
+	]
+
+func _stocked_rows() -> Array[Dictionary]:
+	var stocked: Array[Dictionary] = []
+	for row in _warehouse_rows():
+		if _has_available_stock(row.marker as Marker3D):
+			stocked.append(row)
+	return stocked
+
+func _choose_two_rows(eligible_rows: Array[Dictionary]) -> Array[Dictionary]:
+	var first_index := _automatic_job_rng.randi_range(0, eligible_rows.size() - 1)
+	var second_index := _automatic_job_rng.randi_range(0, eligible_rows.size() - 2)
+	if second_index >= first_index:
+		second_index += 1
+	return [eligible_rows[first_index], eligible_rows[second_index]]
+
+func _request_random_multi_item_order(priority: int) -> bool:
+	var stocked := _stocked_rows()
+	if stocked.size() < MULTI_ITEM_ORDER_SIZE:
+		print("Multi-item order rejected: fewer than 2 stocked rows")
+		return false
+	return _request_multi_item_order(_choose_two_rows(stocked), priority)
+
+func _request_multi_item_order(rows: Array[Dictionary], priority: int) -> bool:
+	# All rejection checks happen before IDs or inventory are consumed.
+	if not _navigation_ready:
+		print("Multi-item order rejected: navigation is not ready")
+		return false
+	if rows.size() != MULTI_ITEM_ORDER_SIZE \
+			or rows[0].marker == rows[1].marker \
+			or not _has_available_stock(rows[0].marker as Marker3D) \
+			or not _has_available_stock(rows[1].marker as Marker3D):
+		print("Multi-item order rejected: fewer than 2 stocked rows")
+		return false
+	if _job_queue.size() + MULTI_ITEM_ORDER_SIZE > MAX_PENDING_JOBS:
+		print("Multi-item order rejected: insufficient queue capacity")
+		return false
+
+	var reserved_rows: Array[Dictionary] = []
+	for row in rows:
+		if not _reserve_stock(row.marker as Marker3D, row.name):
+			for reserved_row in reserved_rows:
+				_release_stock(reserved_row.marker as Marker3D, reserved_row.name)
+			print("Multi-item order rejected: inventory reservation failed")
+			return false
+		reserved_rows.append(row)
+
+	var order_id := _next_order_id
+	var accepted_msec := Time.get_ticks_msec()
+	var child_jobs: Array[Dictionary] = []
+	for index in rows.size():
+		var row: Dictionary = rows[index]
+		child_jobs.append(_create_job(
+			row.marker as Marker3D, row.name, priority, order_id,
+			index + 1, MULTI_ITEM_ORDER_SIZE, accepted_msec
+		))
+	_orders[order_id] = {
+		"id": order_id, "priority": priority, "accepted_msec": accepted_msec,
+		"item_count": MULTI_ITEM_ORDER_SIZE, "completed": 0, "failed": 0,
+		"cancelled": 0, "state": OrderState.OPEN,
+	}
+	_order_child_results[order_id] = {}
+	_next_order_id += 1
+	print("Order #%03d accepted: %s + %s [%s]" % [
+		order_id, rows[0].name, rows[1].name, _priority_name(priority),
+	])
+	# Enqueue both before waking the one existing fleet dispatcher. This is the
+	# commit point for atomic acceptance; robots still see ordinary child jobs.
+	for job in child_jobs:
+		_enqueue_job_by_priority(job)
+		print("Order #%03d Item %d -> Job #%03d: %s" % [
+			order_id, job.order_item_index, job.id, job.pickup_name,
+		])
+	_schedule_fleet_dispatch()
+	_update_job_ui(_job_status_text())
+	_update_operations_ui()
+	return true
+
+func _create_job(
+		pickup_marker: Marker3D, pickup_name: String, priority: int,
+		order_id: int = 0, order_item_index: int = 0, order_item_count: int = 0,
+		accepted_msec: int = 0
+) -> Dictionary:
+	var acceptance_time := Time.get_ticks_msec() if accepted_msec == 0 else accepted_msec
+	var job := {
+		"id": _next_job_id, "pickup_marker": pickup_marker, "pickup_name": pickup_name,
+		"priority": priority, "accepted_msec": acceptance_time,
+		"sla_seconds": _sla_seconds_for_priority(priority), "order_id": order_id,
+		"order_item_index": order_item_index, "order_item_count": order_item_count,
+	}
+	_next_job_id += 1
+	_jobs_accepted += 1
+	return job
 
 func _find_dispatchable_robot(job: Dictionary) -> RobotController:
 	var selection: Dictionary = _select_robot_for_job(job, false)
@@ -775,8 +890,40 @@ func _elapsed_seconds(state: Dictionary) -> float: return (Time.get_ticks_msec()
 func _lead_seconds(state: Dictionary) -> float:
 	return 0.0 if int(state.accepted_msec) == 0 else (Time.get_ticks_msec() - int(state.accepted_msec)) / 1000.0
 func _record_job_result(job: Dictionary, status: String, elapsed: float, lead: float, sla_result: String) -> void:
-	_recent_job_history.push_front({"id": job.id, "pickup_name": job.pickup_name, "priority": job.priority, "status": status, "duration": elapsed, "lead_time": lead, "wait_time": lead if status == "CANCELLED" else 0.0, "sla_seconds": job.sla_seconds, "sla_result": sla_result})
+	_recent_job_history.push_front({"id": job.id, "pickup_name": job.pickup_name, "priority": job.priority, "status": status, "duration": elapsed, "lead_time": lead, "wait_time": lead if status == "CANCELLED" else 0.0, "sla_seconds": job.sla_seconds, "sla_result": sla_result, "order_id": int(job.get("order_id", 0))})
 	if _recent_job_history.size() > MAX_RECENT_JOB_HISTORY: _recent_job_history.pop_back()
+	_record_order_child_result(job, status)
+
+func _record_order_child_result(job: Dictionary, status: String) -> void:
+	var order_id := int(job.get("order_id", 0))
+	if order_id == 0 or not _orders.has(order_id):
+		return
+	var recorded: Dictionary = _order_child_results[order_id]
+	if recorded.has(job.id):
+		return
+	recorded[job.id] = status
+	var order: Dictionary = _orders[order_id]
+	match status:
+		"COMPLETE": order.completed += 1
+		"FAILED": order.failed += 1
+		"CANCELLED": order.cancelled += 1
+	var terminal_count: int = order.completed + order.failed + order.cancelled
+	if terminal_count < int(order.item_count):
+		return
+	if order.failed > 0:
+		order.state = OrderState.FAILED
+		_orders_failed += 1
+	elif order.cancelled > 0:
+		order.state = OrderState.CANCELLED
+		_orders_cancelled += 1
+	else:
+		order.state = OrderState.COMPLETE
+		_orders_completed += 1
+	var lead_seconds := (Time.get_ticks_msec() - int(order.accepted_msec)) / 1000.0
+	print("Order #%03d %s — %d/%d items packed — %.1fs" % [
+		order_id, _order_state_name(order.state), order.completed, order.item_count,
+		lead_seconds,
+	])
 
 func _update_operations_ui() -> void:
 	var active: Array[String] = []
@@ -785,19 +932,22 @@ func _update_operations_ui() -> void:
 		if not state.is_empty() and _is_job_active(state): active.append("%s #%03d" % [fleet_robot.name, state.job.id])
 	var average := "--" if _jobs_completed == 0 else "%.1fs" % (_completed_execution_seconds / _jobs_completed)
 	var hit_rate := "--" if _jobs_completed == 0 else "%.1f%%" % (float(_sla_on_time) / _jobs_completed * 100.0)
-	var lines: Array[String] = ["Operations", "Auto Orders: %s [A]" % ("ON" if _automatic_workload_enabled else "OFF"), "Accepted: %d" % _jobs_accepted, "Completed: %d" % _jobs_completed, "Failed: %d" % _jobs_failed, "Cancelled: %d" % _jobs_cancelled, "Active: %s" % ("None" if active.is_empty() else ", ".join(active)), "Avg complete: %s" % average, "SLA on-time: %d" % _sla_on_time, "SLA late: %d" % _sla_late, "SLA hit rate: %s" % hit_rate, "SLA targets: N 20s / H 12s", "", "Recent"]
+	var orders_open := _orders.size() - _orders_completed - _orders_failed - _orders_cancelled
+	var lines: Array[String] = ["Operations", "Auto Orders: %s [A]" % ("ON" if _automatic_workload_enabled else "OFF"), "Accepted: %d" % _jobs_accepted, "Completed: %d" % _jobs_completed, "Failed: %d" % _jobs_failed, "Cancelled: %d" % _jobs_cancelled, "Active: %s" % ("None" if active.is_empty() else ", ".join(active)), "Orders O/C/F/X: %d/%d/%d/%d" % [orders_open, _orders_completed, _orders_failed, _orders_cancelled], "Avg complete: %s" % average, "SLA on-time: %d" % _sla_on_time, "SLA late: %d" % _sla_late, "SLA hit rate: %s" % hit_rate, "SLA targets: N 20s / H 12s", "", "Recent"]
 	if _recent_job_history.is_empty(): lines.append("No job history yet")
 	else:
 		for result in _recent_job_history:
+			var order_text := "" if result.order_id == 0 else " O#%03d" % result.order_id
 			if result.status == "CANCELLED":
-				lines.append("#%03d [%s] %s CANCELLED wait %.1fs" % [
+				lines.append("#%03d%s [%s] %s CANCELLED wait %.1fs" % [
 					result.id,
+					order_text,
 					_priority_name(result.priority),
 					result.pickup_name.replace("Shelf Row ", "Row"),
 					result.wait_time,
 				])
 				continue
-			lines.append("#%03d [%s] %s %s %.1fs%s" % [result.id, _priority_name(result.priority), result.pickup_name.replace("Shelf Row ", "Row"), result.status, result.duration, "" if result.sla_result == "" else " " + result.sla_result])
+			lines.append("#%03d%s [%s] %s %s %.1fs%s" % [result.id, order_text, _priority_name(result.priority), result.pickup_name.replace("Shelf Row ", "Row"), result.status, result.duration, "" if result.sla_result == "" else " " + result.sla_result])
 	operations_status_label.text = "\n".join(lines)
 
 func _get_source_package_for_pickup(marker: Marker3D) -> MeshInstance3D:
@@ -832,7 +982,7 @@ func _fleet_has_warehouse_workload() -> bool:
 	return false
 
 func _update_job_ui(status: String) -> void:
-	job_status_label.text = "Warehouse Jobs\n1–4: Normal jobs\nQ/W/E/R: High priority\nCancel pending: [Z] next  [X] latest\nStatus: %s\n%s" % [status, _queue_ui_text()]
+	job_status_label.text = "Warehouse Jobs\n1–4: Normal jobs\nQ/W/E/R: High priority\n[M] 2-item order  [Shift+M] High\nCancel pending: [Z] next  [X] latest\nStatus: %s\n%s" % [status, _queue_ui_text()]
 func _queue_ui_text() -> String:
 	var lines: Array[String] = ["Pending: %d/%d" % [_job_queue.size(), MAX_PENDING_JOBS]]
 	if _job_queue.size() > 0: lines.append("Next: #%03d [%s] %s" % [_job_queue[0].id, _priority_name(_job_queue[0].priority), _job_queue[0].pickup_name])
@@ -841,6 +991,12 @@ func _queue_ui_text() -> String:
 	return "\n".join(lines)
 func _job_status_text() -> String: return "Ready" if _navigation_ready else "Preparing navigation..."
 func _priority_name(priority: int) -> String: return "HIGH" if priority == JobPriority.HIGH else "NORMAL"
+func _order_state_name(state: int) -> String:
+	match state:
+		OrderState.COMPLETE: return "COMPLETE"
+		OrderState.FAILED: return "FAILED"
+		OrderState.CANCELLED: return "CANCELLED"
+		_: return "OPEN"
 func _sla_seconds_for_priority(priority: int) -> float: return HIGH_SLA_SECONDS if priority == JobPriority.HIGH else NORMAL_SLA_SECONDS
 func _format_vector3(value: Vector3) -> String: return "(%.3f, %.3f, %.3f)" % [value.x, value.y, value.z]
 
