@@ -1,6 +1,15 @@
 extends Node3D
 
-enum JobState { IDLE, TRAVELLING_TO_PICKUP, PICKING, TRAVELLING_TO_PACKING, COMPLETE, FAILED }
+enum JobState {
+	IDLE,
+	TRAVELLING_TO_PICKUP,
+	PICKING,
+	TRAVELLING_TO_PACKING,
+	WAITING_FOR_PACKING,
+	PACKING,
+	COMPLETE,
+	FAILED,
+}
 enum JobPriority { NORMAL, HIGH }
 enum OrderState { OPEN, COMPLETE, FAILED, CANCELLED }
 enum ChargeState { NONE, TRAVELLING, CHARGING }
@@ -25,6 +34,8 @@ const AUTO_JOB_INTERVAL_SECONDS := 4.0
 const AUTO_HIGH_PRIORITY_CHANCE := 0.2
 const AUTO_MULTI_ITEM_ORDER_CHANCE := 0.35
 const MULTI_ITEM_ORDER_SIZE := 2
+const PACKING_STATION_CAPACITY := 1
+const PACKING_PROCESS_SECONDS := 3.0
 
 @onready var navigation_region: NavigationRegion3D = $NavigationRegion3D
 @onready var robot_01: RobotController = $Robot01
@@ -90,6 +101,8 @@ var _recent_job_history: Array[Dictionary] = []
 var _automatic_workload_enabled := false
 var _automatic_job_timer: Timer
 var _automatic_job_rng := RandomNumberGenerator.new()
+var _packing_active: Array[RobotController] = []
+var _packing_wait_queue: Array[RobotController] = []
 
 func _ready() -> void:
 	_available_stock = {shelf_01_pickup: 3, shelf_02_pickup: 3, shelf_03_pickup: 3, shelf_04_pickup: 3}
@@ -772,7 +785,7 @@ func _on_robot_destination_reached(_destination: Vector3, fleet_robot: RobotCont
 		_begin_station_charging(fleet_robot); return
 	match state.job_state:
 		JobState.TRAVELLING_TO_PICKUP: _begin_pickup(fleet_robot)
-		JobState.TRAVELLING_TO_PACKING: _complete_job(fleet_robot)
+		JobState.TRAVELLING_TO_PACKING: _request_packing_slot(fleet_robot)
 		_: _schedule_fleet_dispatch()
 
 func _on_robot_navigation_target_failed(destination: Vector3, remaining: float, fleet_robot: RobotController) -> void:
@@ -802,8 +815,65 @@ func _begin_pickup(fleet_robot: RobotController) -> void:
 	state.job_state = JobState.TRAVELLING_TO_PACKING
 	_command_job_target(fleet_robot, _packing_dropoff_for(fleet_robot), "Packing Station")
 
+func _request_packing_slot(fleet_robot: RobotController) -> void:
+	var state: Dictionary = _robot_state[fleet_robot]
+	if state.job_state != JobState.TRAVELLING_TO_PACKING:
+		return
+	if _packing_active.size() < PACKING_STATION_CAPACITY:
+		_begin_packing(fleet_robot)
+		return
+	state.job_state = JobState.WAITING_FOR_PACKING
+	state.speed = 0.0
+	if not _packing_wait_queue.has(fleet_robot):
+		_packing_wait_queue.append(fleet_robot)
+	print("%s waiting for Packing Station — Job #%03d" % [fleet_robot.name, state.job.id])
+	_update_movement_ui()
+	_update_operations_ui()
+
+func _begin_packing(fleet_robot: RobotController) -> void:
+	var state: Dictionary = _robot_state[fleet_robot]
+	if state.job_state not in [JobState.TRAVELLING_TO_PACKING, JobState.WAITING_FOR_PACKING]:
+		return
+	_packing_wait_queue.erase(fleet_robot)
+	if not _packing_active.has(fleet_robot):
+		if _packing_active.size() >= PACKING_STATION_CAPACITY:
+			return
+		_packing_active.append(fleet_robot)
+	state.job_state = JobState.PACKING
+	state.speed = 0.0
+	var expected_job_id := int(state.job.id)
+	print("%s packing started — Job #%03d" % [fleet_robot.name, expected_job_id])
+	_update_movement_ui()
+	_update_operations_ui()
+	await get_tree().create_timer(PACKING_PROCESS_SECONDS).timeout
+	if state.job_state != JobState.PACKING \
+			or not _packing_active.has(fleet_robot) \
+			or state.job.is_empty() \
+			or int(state.job.id) != expected_job_id:
+		return
+	print("%s packing finished — Job #%03d" % [fleet_robot.name, expected_job_id])
+	_complete_job(fleet_robot)
+
+func _release_packing_slot(fleet_robot: RobotController) -> bool:
+	_packing_wait_queue.erase(fleet_robot)
+	var released := _packing_active.has(fleet_robot)
+	_packing_active.erase(fleet_robot)
+	return released
+
+func _start_waiting_packing_jobs() -> void:
+	while _packing_active.size() < PACKING_STATION_CAPACITY \
+			and not _packing_wait_queue.is_empty():
+		var waiting_robot: RobotController = _packing_wait_queue.pop_front()
+		var waiting_state: Dictionary = _robot_state.get(waiting_robot, {})
+		if waiting_state.is_empty() \
+				or waiting_state.job_state != JobState.WAITING_FOR_PACKING \
+				or waiting_state.job.is_empty():
+			continue
+		_begin_packing(waiting_robot)
+
 func _complete_job(fleet_robot: RobotController) -> void:
 	var state: Dictionary = _robot_state[fleet_robot]
+	_release_packing_slot(fleet_robot)
 	var elapsed := _elapsed_seconds(state)
 	var lead := _lead_seconds(state)
 	var sla_result := "ON TIME" if lead <= float(state.sla_seconds) else "LATE"
@@ -817,10 +887,11 @@ func _complete_job(fleet_robot: RobotController) -> void:
 	print("%s completed Job #%03d" % [fleet_robot.name, state.job.id])
 	_reset_job_state(state, JobState.COMPLETE)
 	_show_delivered_package_briefly()
-	_update_operations_ui(); _schedule_fleet_dispatch()
+	_update_movement_ui(); _update_operations_ui(); _start_waiting_packing_jobs(); _schedule_fleet_dispatch()
 
 func _fail_job(fleet_robot: RobotController, reason: String) -> void:
 	var state: Dictionary = _robot_state[fleet_robot]
+	_release_packing_slot(fleet_robot)
 	_jobs_failed += 1
 	_record_job_result(state.job, "FAILED", _elapsed_seconds(state), _lead_seconds(state), "FAILED")
 	_cargo_for(fleet_robot).visible = false
@@ -828,7 +899,7 @@ func _fail_job(fleet_robot: RobotController, reason: String) -> void:
 	if state.stock_reserved: _release_stock(state.pickup_marker, state.pickup_name)
 	print("%s Job #%03d failed: %s" % [fleet_robot.name, state.job.id, reason])
 	_reset_job_state(state, JobState.FAILED)
-	_update_operations_ui(); _schedule_fleet_dispatch()
+	_update_movement_ui(); _update_operations_ui(); _start_waiting_packing_jobs(); _schedule_fleet_dispatch()
 
 func _reset_job_state(state: Dictionary, final_state: int) -> void:
 	state.job_state = final_state; state.job = {}; state.pickup_marker = null; state.pickup_name = ""
@@ -933,7 +1004,7 @@ func _update_operations_ui() -> void:
 	var average := "--" if _jobs_completed == 0 else "%.1fs" % (_completed_execution_seconds / _jobs_completed)
 	var hit_rate := "--" if _jobs_completed == 0 else "%.1f%%" % (float(_sla_on_time) / _jobs_completed * 100.0)
 	var orders_open := _orders.size() - _orders_completed - _orders_failed - _orders_cancelled
-	var lines: Array[String] = ["Operations", "Auto Orders: %s [A]" % ("ON" if _automatic_workload_enabled else "OFF"), "Accepted: %d" % _jobs_accepted, "Completed: %d" % _jobs_completed, "Failed: %d" % _jobs_failed, "Cancelled: %d" % _jobs_cancelled, "Active: %s" % ("None" if active.is_empty() else ", ".join(active)), "Orders O/C/F/X: %d/%d/%d/%d" % [orders_open, _orders_completed, _orders_failed, _orders_cancelled], "Avg complete: %s" % average, "SLA on-time: %d" % _sla_on_time, "SLA late: %d" % _sla_late, "SLA hit rate: %s" % hit_rate, "SLA targets: N 20s / H 12s", "", "Recent"]
+	var lines: Array[String] = ["Operations", "Auto Orders: %s [A]" % ("ON" if _automatic_workload_enabled else "OFF"), "Accepted: %d" % _jobs_accepted, "Completed: %d" % _jobs_completed, "Failed: %d" % _jobs_failed, "Cancelled: %d" % _jobs_cancelled, "Active: %s" % ("None" if active.is_empty() else ", ".join(active)), "Packing: %d/%d busy | Waiting: %d" % [_packing_active.size(), PACKING_STATION_CAPACITY, _packing_wait_queue.size()], "Orders O/C/F/X: %d/%d/%d/%d" % [orders_open, _orders_completed, _orders_failed, _orders_cancelled], "Avg complete: %s" % average, "SLA on-time: %d" % _sla_on_time, "SLA late: %d" % _sla_late, "SLA hit rate: %s" % hit_rate, "SLA targets: N 20s / H 12s", "", "Recent"]
 	if _recent_job_history.is_empty(): lines.append("No job history yet")
 	else:
 		for result in _recent_job_history:
@@ -965,7 +1036,7 @@ func _show_delivered_package_briefly() -> void:
 	if flash_id == _delivery_flash_id: delivered_package.visible = false
 
 func _is_job_active(state: Dictionary) -> bool:
-	return state.job_state in [JobState.TRAVELLING_TO_PICKUP, JobState.PICKING, JobState.TRAVELLING_TO_PACKING]
+	return state.job_state in [JobState.TRAVELLING_TO_PICKUP, JobState.PICKING, JobState.TRAVELLING_TO_PACKING, JobState.WAITING_FOR_PACKING, JobState.PACKING]
 func _robot_is_available(state: Dictionary) -> bool:
 	return not _is_job_active(state) and state.charge_state == ChargeState.NONE \
 			and state.movement_status != "Moving"
@@ -1024,6 +1095,8 @@ func _update_movement_ui() -> void:
 func _job_leg_status(state: Dictionary) -> String:
 	if state.job_state == JobState.TRAVELLING_TO_PICKUP: return "To " + str(state.pickup_name).replace("Shelf Row ", "Shelf ")
 	if state.job_state == JobState.PICKING: return "Picking"
+	if state.job_state == JobState.WAITING_FOR_PACKING: return "Waiting Packing"
+	if state.job_state == JobState.PACKING: return "Packing"
 	return "To Packing"
 func _battery_status_name(state: Dictionary) -> String:
 	if state.battery_percent <= 0.0: return "EMPTY"
